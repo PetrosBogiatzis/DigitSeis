@@ -14,8 +14,47 @@ function DigitSeis % for opening older analysis if replace the name of the funct
 %  DigitSeis uses rgb2hsv_fast.m that can be found at
 %  http://www.mathworks.com/matlabcentral/fileexchange/15985-fast-rgb2hsv/content/rgb2hsv_fast.m
 %  DigitSeis uses writesac.m function that can be found at SAC
-%  distributions:
-%  http://ds.iris.edu/ds/nodes/dmc/forms/sac/
+%  distributions: %  http://ds.iris.edu/ds/nodes/dmc/forms/sac/
+%
+%  Digitseis  is on the Github
+%  https://github.com/PetrosBogiatzis/DigitSeis
+%
+%  Version 0.72
+%   - Remove region in Correct classification gui (binary image)
+%   - Added contrast interactive tool in correct trace gui
+%   - Added buttons in the "select traces to digitize" dialog for fast
+%     selections.
+%   - changed in digitize_trace_and_tickmarks.m the bounds of minimization to be more robust when objects are
+%     not in the middle
+%   - minor bug fixes and improvements. 
+% 
+%  Version 0.692
+%   - Bug fixes in correct trace gui (zoom out, change classification, others)
+%   - performance improvements
+%   - when applying the corrected trace, there is an option to replace only
+%     the numeric values (skip NaNs).
+%
+%  Version 0.69
+%    - Now digitization returns also the std of the digitized column. It is
+%      included in a second block of data i.e., DATA2 at the SAC structure.
+%       > Files digitize_trace_without_tickmarks.m,
+%         digitize_trace_and_tickmarks.m have also changed.
+%       > File digitize_regionSTD.m has been added
+%    - minor improvements - bug fixes when loading previous analyses
+%
+%  Version 0.68
+%    - Added the option to correct portion of a trace instead of the whole
+%      trace.
+%    - minor modifications here and there.
+%
+%  Version 0.67
+%    - Added an input dialog that allows purging all small objects in binary
+%      image during the identification of traces and time marks procedure.
+%    - Added option to filter the image for get ridding the salt & pepper
+%      noise using either 2-D median or Wiener filter.
+%    - Added a button to reset zoom to the whole image  in the "edit
+%      classification" gui
+%    - Added a button to purge red-noise objects at the "edit classification" gui
 %
 %  Version 0.65
 %    - Support for seismograms without time marks added. -->set time mark
@@ -154,6 +193,12 @@ uipushtool(temp(1),'Tag','Remove background','Cdata',imread('Removebackground.pn
     'Separator','on','TooltipString','Click remove lare background stains-colorization',...
     'HandleVisibility','on','ClickedCallback',@remove_background_withGAUSSFILT);
 
+% Create button image & Button
+tempim=imnoise(zeros([16,16,3],'uint8'),'salt & pepper',0.2);
+for ii=2:16, tempim(ii-1:ii,ii-1:ii,1)=255; tempim(ii-1:ii,ii-1:ii,2:3)=0 ;tempim([ii-1:ii],17-[ii-1:ii],1)=255; tempim([ii-1:ii],17-[ii-1:ii],2:3)=0; end
+uipushtool(temp(1),'Cdata',tempim,...
+    'Separator','off','TooltipString','Remove salt & pepper noise',...
+    'HandleVisibility','on','Enable','on','ClickedCallback',@remove_SaltandPepper);
 
 uipushtool(temp(1),'Tag','Correct rotation','Cdata',imread('correct_rotation.png','BackgroundColor',[1 1 1]),...
     'Separator','on','TooltipString','Cprrect for rotation',...
@@ -175,22 +220,12 @@ uipushtool(temp(1),'Tag','Measure tick length','Cdata',polarity_ic,...
 clear polarity_ic;
 
 
-
-% % correct for repeated columns
-% icon_m=0.4*ones([16,16,3]); icon_m(:,8:11,:)=1;
-% uipushtool(temp(1),'Tag','Correct repeated columns','Cdata',icon_m,...
-%     'Separator','on','TooltipString','Click to correct repeated columns',...
-%     'HandleVisibility','on','ClickedCallback',@Correct_repeated_columns);
-% clear icon_m
-
 % Time marks up or down
 icon_m=zeros([16,16,3]); icon_m(8,:,:)=1; icon_m(4,6:10,:)=1; icon_m(13,6:10,1)=1;
 H.timemarkpos=uitoggletool(temp(1),'Tag','Time marks relative position','Cdata',icon_m,...
     'Separator','on','TooltipString','Click to indicate that time mark offset occurs downward',...
     'HandleVisibility','on', 'State','off');
 clear icon_m
-
-
 
 H.tbar=findall(findall(H.f1,'Type','uitoolbar'));
 H.tbar_UNDO=findobj(temp(1),'Tag','Undo last');
@@ -199,10 +234,11 @@ H.tbar_UNDO=findobj(temp(1),'Tag','Undo last');
 
 
 
-
 H.textfilename=uicontrol('Style', 'text','Parent',H.f1,'units','normalized',...
-    'String', 'seismogram file','Position', [0.12 0.96 0.802 0.04],'BackgroundColor',[1 1 1]);
-
+    'String', 'seismogram file','Position', [0.2 0.96 0.502 0.04],'BackgroundColor',[1 1 1]);
+H.CursorPosText=uicontrol('Style', 'text','Parent',H.f1,'units','normalized',...
+    'String', 'Cursor coordinates','Position', [0.7 0.95 0.2 0.04],'BackgroundColor',[1 1 1],...
+    'FontSize',14);
 
 H.ax1=axes('Units','Normalized','Position',[0.12 0.21 0.802 0.72],...
     'Xtick',[],'Ytick',[],'box','on','Parent',H.f1,'Xaxislocation','Top','CLimMode','manual','Clim',[0 255]);
@@ -289,33 +325,34 @@ H.togle_timebounds_visibility=uicontrol('Style', 'checkbox','Parent',H.f1,'units
 
 %DT
 H.edit_DT=uicontrol('Style', 'edit','Parent',H.f1,'units','normalized',...
-    'TooltipString','time dist between timemarks (s)','String','60',...
-    'Position',[0.002 0.54 0.038 0.035],'BackgroundColor',[1 1 1],'Enable','on');
+    'TooltipString','Time difference between timemarks (s)','String','60',...
+    'Position',[0.002 0.59 0.038 0.035],'BackgroundColor',[1 1 1],'Enable','on');
 H.edit_DTtrace=uicontrol('Style', 'edit','Parent',H.f1,'units','normalized',...
     'TooltipString','time difference between succeding traces (in hours)','String','1',...
-    'Position',[0.044 0.54 0.038 0.035],'BackgroundColor',[1 1 1],'Enable','on');
+    'Position',[0.044 0.59 0.038 0.035],'BackgroundColor',[1 1 1],'Enable','on');
 
 H.edit_DP=uicontrol('Style', 'edit','Parent',H.f1,'units','normalized',...
     'TooltipString','pixel dist between timemarks (px)','String', '',...
-    'Position',[0.002 0.5 0.038 0.035],'BackgroundColor',[1 1 1],'Enable','on');
+    'Position',[0.002 0.55 0.038 0.035],'BackgroundColor',[1 1 1],'Enable','on');
 H.edit_tick_xlength=uicontrol('Style', 'edit','Parent',H.f1,'units','normalized',...
     'TooltipString','Approximate time mark length (px)','String', '25',...
-    'Position',[0.044 0.5 0.038 0.035],'BackgroundColor',[1 1 1],...
+    'Position',[0.044 0.55 0.038 0.035],'BackgroundColor',[1 1 1],...
     'Callback',@Evaluate_ticklength_input);
 
 H.auto_num_of_traces=uicontrol('Style', 'pushbutton','Parent',H.f1,'units','normalized',...
-    'String', {'Identify traces', '& timemarks'},'Position', [0.002 0.46 0.08 0.04],...
+    'String', {'Identify traces', '& timemarks'},'Position', [0.002 0.505 0.08 0.04],...
     'Callback',@find_traces,'Enable','off');
-
 H.adjust_traces=uicontrol('Style', 'pushbutton','Parent',H.f1,'units','normalized',...
-    'String', 'Adjust traces','Position', [0.002 0.42 0.08 0.04],'Callback',@adjust_traces);
+    'String', 'Adjust traces','Position', [0.002 0.465 0.08 0.04],'Callback',@adjust_traces);
 
 H.togle_traces_visibility=uicontrol('Style', 'checkbox','Parent',H.f1,'units','normalized',...
-    'String', 'Traces visible','Enable','off','Position', [0.002 0.389 0.08 0.03],...
+    'String', 'Traces 0-line visible','Enable','off','Position', [0.002 0.435 0.08 0.03],...
     'BackgroundColor','w','Callback',@traces_visibility);
-
 H.togle_digital_traces_visibility=uicontrol('Style', 'checkbox','Parent',H.f1,'units','normalized',...
-    'String', 'Digitized traces visible','Enable','on','Position', [0.002 0.363 0.08 0.03],...
+    'String', 'Digitized traces visible','Enable','on','Position', [0.002 0.412 0.08 0.03],...
+    'BackgroundColor','w','Callback',@digital_traces_visibility);
+H.togle_digital_traces_STD_visibility=uicontrol('Style', 'checkbox','Parent',H.f1,'units','normalized',...
+    'String', 'Digitized traces std visible','Enable','on','Position', [0.002 0.39 0.08 0.03],...
     'BackgroundColor','w','Callback',@digital_traces_visibility);
 
 
@@ -349,16 +386,10 @@ H.digitize_1=uicontrol('Style', 'pushbutton','Parent',H.f1,'units','normalized',
 
 
 H.strMousePos=uicontrol('Style', 'pushbutton','Parent',H.f1,'units','normalized',...
-    'String', '','Tooltip','Push to reset','Position', [0.002 0.002 0.08 0.04],'Callback',set (H.f1, 'WindowButtonMotionFcn', @mouseMove));
+    'String', '','FontSize',11,'Tooltip','Push to reset','Position', [0.002 0.002 0.08 0.04],'Callback',set (H.f1, 'WindowButtonMotionFcn', @mouseMove));
 
 set (H.f1, 'WindowButtonMotionFcn', @mouseMove); % Display continiously mouse location
 set(H.f1,'Visible','on')
-
-
-
-
-
-
 
 
 
@@ -385,6 +416,7 @@ global H
 try
     C = get(H.ax1, 'CurrentPoint');
     set(H.strMousePos,'String',['(X,Y) = (', num2str(C(1,1),'%6.0f'), ', ',num2str(C(1,2),'%6.0f'), ')']);
+    set(H.CursorPosText,'String',['(X,Y) = (', num2str(C(1,1),'%6.0f'), ', ',num2str(C(1,2),'%6.0f'), ')']);
 end
 end
 
@@ -550,8 +582,8 @@ end
 function adjust_contrast(hObject, eventdata)
 global H I0 Iundo
 Iundo=I0;
-hFig = figure('Color','w','Toolbar','none',...
-    'Menubar','none','Visible','off','closerequestfcn','');
+hFig = figure('Color','w','Toolbar','none','NumberTitle','off',...
+    'Menubar','none','Visible','off','closerequestfcn','','Name',H.textfilename.String);
 hIm = imshow(I0);
 hSP = imscrollpanel(hFig,hIm);
 set(hSP,'Units','normalized',...
@@ -570,6 +602,79 @@ delete(hFig);
 set(H.tbar_UNDO,'Enable','on');
 end
 
+
+function remove_SaltandPepper(hObject,eventdata)
+global I0 Iundo H
+
+Fig_remove_SaltandPepper = figure('Units','Normalized','Position',[0.1 0.1 0.5 0.7],...
+    'color','w','WindowStyle','Normal','NumberTitle','Off','Name','Remove bacground long wavelength noise of the image with Gaussian filtering');
+
+hbg=uibuttongroup('Visible','on','BackgroundColor',[1 1 1],'Position',[0.01 0.01 0.25 0.04],'Title','Filter type');
+uicontrol(hbg,'Style','radiobutton','units','normalized',...
+    'String', '2-D Median','BackgroundColor',[1 1 1],...
+    'Position', [0.05 0.01 0.4 1]);
+uicontrol(hbg,'Style','radiobutton','units','normalized',...
+    'String', 'Wiener','BackgroundColor',[1 1 1],...
+    'Position', [0.55 0.01 0.4 1]);
+
+uicontrol('Style', 'Text','Parent',Fig_remove_SaltandPepper,'units','normalized',...
+    'String', 'm x n neighborhood:','BackgroundColor',[1 1 1],...
+    'Position', [0.30 0.015 0.08 0.02],'HorizontalAlignment','right');
+Mvalue=uicontrol('Style', 'Edit','Parent',Fig_remove_SaltandPepper,'units','normalized','tag','Vsigma',...
+    'String', '4','Tooltip','Enter a positive scalar','BackgroundColor',[1 1 1],...
+    'Position', [0.39 0.02 0.06 0.02]);
+uicontrol('Style', 'Text','Parent',Fig_remove_SaltandPepper,'units','normalized',...
+    'String', 'x','BackgroundColor',[1 1 1],...
+    'Position', [0.455 0.015 0.01 0.02]);
+Nvalue=uicontrol('Style', 'Edit','Parent',Fig_remove_SaltandPepper,'units','normalized','tag','Vsigma',...
+    'String', '4','Tooltip','Enter a positive scalar','BackgroundColor',[1 1 1],...
+    'Position', [0.468 0.02 0.06 0.02]);
+
+uicontrol('Style', 'pushbutton','Parent',Fig_remove_SaltandPepper,'units','normalized',...
+    'String', 'Preview', 'Position',[0.68 0.01 0.09 0.04],'Callback',@PreviewChanges);
+
+uicontrol('Style', 'pushbutton','Parent',Fig_remove_SaltandPepper,'units','normalized',...
+    'String', 'Apply','Position', [0.79 0.01 0.09 0.04],'Callback',@ApplyChanges);
+
+uicontrol('Style', 'pushbutton','Parent',Fig_remove_SaltandPepper,'units','normalized',...
+    'String', 'Cancel','Position', [0.90 0.01 0.09 0.04],'Callback',@(hObject,eventdata)(close(Fig_remove_background)));
+
+
+%%
+ax1=subplot(2,1,1);
+imshow(I0)
+ax2=subplot(2,1,2);
+Itemp=I0;
+HItemp=imshow(Itemp);
+ax2.Visible='off';
+linkaxes([ax1,ax2])
+waitfor(Fig_remove_SaltandPepper)
+clear Itemp;
+
+
+    function PreviewChanges(hObject_l,eventdata_l)
+        mn=[str2double(get(Mvalue,'String')) str2double(get(Nvalue,'String'))];
+        if strcmp(get(hbg,'SelectedObject'),'Wiener')
+            Itemp=wiener2(I0,mn);
+        else
+            Itemp=medfilt2(I0,mn);
+        end
+        set(HItemp,'CData',Itemp);
+        drawnow;
+        disp('ok')
+    end
+
+    function ApplyChanges(hObject_l,eventdata_l)
+        PreviewChanges;
+        Iundo=I0;
+        I0=Itemp;
+        update_plot_image;
+        delete(Fig_remove_SaltandPepper);
+        set(H.tbar_UNDO,'Enable','on');
+        
+    end
+
+end
 
 
 
@@ -668,8 +773,14 @@ function remove_region(hObject, eventdata)
 global H Iundo I0
 Iundo=I0; % save an undo copy
 h=imfreehand(H.ax1);
-I0(h.createMask)=0;
-delete(h);
+h.Deletable = false;
+try
+    I0(h.createMask)=0;
+    delete(h);
+catch
+    delete(h);
+    return
+end
 update_plot_image;
 set(H.tbar_UNDO,'Enable','on');
 end
@@ -825,8 +936,8 @@ set(H.ax2,'yticklabel','','ylim',[1 size(I0,1)],'Ydir','Reverse');
 
 %cross-correlate and find trend
 maxlags=round(rows/3);
-shift=zeros(1,9);
-imaxc=zeros(1,9);
+shift=zeros(1,num_of_v_divisions-1);
+imaxc=zeros(1,num_of_v_divisions-1);
 for it=2:num_of_v_divisions
     [c_ww{it-1},lags{it-1}] = xcorr(sumI(:,it-1),sumI(:,it),maxlags,'coeff');
     [~,imaxc(it-1)]=max(c_ww{it-1});
@@ -908,13 +1019,26 @@ end
 
 
 function digital_traces_visibility(hObject, eventdata)
-global H ptrace pt_traces
+global H ptrace ptraceSTD % pt_traces
 
 if get(H.togle_digital_traces_visibility,'value')
     set(ptrace,'visible','on')
 else
     set(ptrace,'visible','off')
 end
+
+
+try
+    if get(H.togle_digital_traces_STD_visibility,'value')
+        set(ptraceSTD,'visible','on')
+    else
+        set(ptraceSTD,'visible','off')
+    end
+catch
+   errordlg('Could not find handles for digitized traces STD. If this file is from an older version of DigitSeis without this feature, ignore this message');
+   set(ptraceSTD,'visible','off') 
+end
+
 
 end
 
@@ -943,7 +1067,17 @@ if ~debbbb
     BW=im2bw(I0,level/100);
     
     
-    output_message{end}='Classifying binary image...';
+    prompt = {'Enter the min number of pixels for the objects (connected components) of binary image. Objects with less number of pixels will be removed. press "Cancel" to keep everything'};
+    answerP = inputdlg(prompt,'Number of pixels threshold');
+    if ~isempty(answerP)
+        output_message{end}=sprintf('Removing objects with less than %s pixels',answerP{1});
+        set(H.output_mess,'String',output_message,'Value',length(output_message)); drawnow
+        BW = bwareaopen(BW,round(str2double(answerP{1}))); %removes all connected components (objects) that have fewer than P pixels
+        
+    end
+    
+    
+    output_message{end+1}='Classifying binary image...';
     set(H.output_mess,'String',output_message,'Value',length(output_message)); drawnow
     
     
@@ -1095,6 +1229,7 @@ else strcmpi(typeflag,'LAST')
 end
 
 hpoly=impoly(H.ax1,[X(:),Y(:)],'Closed',false);
+hpoly.Deletable = false;
 pos=round(wait(hpoly));
 delete(hpoly);
 
@@ -1144,6 +1279,7 @@ end
 
 delete(pt_start_time);
 hpoly=impoly(H.ax1,[X(:),Y(:)],'Closed',false);
+hpoly.Deletable = false;
 pos=round(wait(hpoly));
 delete(hpoly);
 
@@ -1266,6 +1402,7 @@ end
 
 delete(pt_end_time);
 hpoly=impoly(H.ax1,[X(:),Y(:)],'Closed',false);
+hpoly.Deletable = false;
 pos=round(wait(hpoly));
 delete(hpoly);
 
@@ -1418,6 +1555,7 @@ global H I0 S BW
 set (H.f1, 'WindowButtonMotionFcn', []);
 
 level=str2double(get(H.edit_luminance,'String'));
+%%
 
 Hfdistinguish=figure ('WindowStyle','normal','toolbar','Figure','Color','w','Name','View-Edit classification','NumberTitle','off',...
     'Units','Normalized','Position',[0.1 0.4 0.85 0.5],'Resizefcn','');
@@ -1449,10 +1587,13 @@ bdraw_along_path=uitoggletool(tempbar(1),'Tag','Seperate','Cdata',imread('drawS.
     'Separator','off','TooltipString','add pixels along the drawn path',...
     'HandleVisibility','on','ClickedCallback',@draw_along_path,'state','off');
 
+bremove_bregion=uitoggletool(tempbar(1),'Tag','RemRegion','Cdata',imread('removeS.png','BackgroundColor',[1 1 1]),...
+    'Separator','off','TooltipString','Remove binary region',...
+    'HandleVisibility','on','ClickedCallback',@remove_bregion,'state','off');
 
 
 bundo_last_action=uipushtool(tempbar(1),'Tag','Undo last remove or add','Cdata',imread('undo.jpeg'),...
-    'Separator','off','TooltipString','Undo last remove path action',...
+    'Separator','on','TooltipString','Undo last remove path action',...
     'HandleVisibility','on','Enable','off','ClickedCallback',@undo_last_action);
 
 
@@ -1465,24 +1606,27 @@ uipushtool(tempbar(1),'Tag','s2Timemark','Cdata',imread('timemark.png','Backgrou
 uipushtool(tempbar(1),'Tag','s2Trace','Cdata',imread('trace.png','BackgroundColor',[1 1 1]),...
     'Separator','off','TooltipString','Select object to ckassify as trace',...
     'HandleVisibility','on','ClickedCallback',@eval_mark,'Enable','on');
+
+uipushtool(tempbar(1),'Tag','Show whole seismogram','Cdata',imread('whole_seismogram.png','BackgroundColor',[1 1 1]),...
+    'Separator','on','TooltipString','Show whole seismogram',...
+    'HandleVisibility','on','ClickedCallback',@zoom2seismogramCLASS);
+
 uipushtool(tempbar(1),'Tag','s2Trace','Cdata',imread('zoom2region.png','BackgroundColor',[1 1 1]),...
-    'Separator','off','TooltipString','Select object to ckassify as trace',...
+    'Separator','off','TooltipString','Zoom DigitSeis main axis to the region displayed in the classification figure',...
     'HandleVisibility','on','ClickedCallback',@zoom2region,'Enable','on');
+
+
 
 bReAssign_Objects_to_Traces=uipushtool(tempbar(1),'Tag','s2Trace','Cdata',imread('AssignObjectsToTraces.png','BackgroundColor',[1 1 1]),...
     'Separator','on','TooltipString','Assign objects to traces',...
     'HandleVisibility','on','ClickedCallback',@ReAssign_Objects_to_Traces,'Enable','on');
 
-
 hToolbar = findall(Hfdistinguish,'tag','FigureToolBar');
 
 
-text(mean(get(ax,'xlim')),mean(get(ax,'ylim')), 'please wait',...
-    'HorizontalAlignment','Center','Parent',ax,'FontSize',32,'BackgroundColor','w');
 
+drawnow % Needed before jToolbar line
 % since Matlab only allows only uipushtools & uitoggletools to toolbars I'm using a Java component.
-drawnow
-
 jToolbar = get(get(hToolbar,'JavaContainer'),'ComponentPeer');
 drawnow
 
@@ -1500,21 +1644,32 @@ JCheckBox.setSize(30,25);
 hJCheckBox = handle(JCheckBox,'callbackproperties');
 hJCheckBox.ActionPerformedCallback = @Show_Object_assignments;
 
-
 Jbox=javax.swing.Box.createHorizontalGlue();
 Jbox.setSize(300,25);
 
+
 temp=zeros(16,16,3,'uint8');
 temp(:,:,1)=255;
-uipushtool(tempbar(1),'Tag','Seperate','Cdata',temp,...
+uipushtool(tempbar(1),'Tag','recalcCLASS','Cdata',temp,...
     'Separator','on','TooltipString','Recalculate Classification',...
-    'HandleVisibility','on',...
-    'ClickedCallback',@recalculate_callback);
+    'HandleVisibility','on','ClickedCallback',@recalculate_callback);
+
+%Create button image & Button
+temp=zeros([16,16,3],'uint8'); rng(1980) ;
+for ii=1:10
+    temp(randi([2,15],6,1),randi([2 15],1),1)=255;
+end
+for ii=2:16, temp(ii-1:ii,ii-1:ii,:)=255; temp([ii-1:ii],17-[ii-1:ii],:)=255; end
+uipushtool(tempbar(1),'Tag','DeleteReds','Cdata',temp,...
+    'Separator','off','TooltipString','Delete noise objects (saves memory)',...
+    'HandleVisibility','on','Enable','on','ClickedCallback',@deleteRedObjects);
 
 
-jToolbar.add(Jbox,20);
-jToolbar.add(JCheckBox,22);
-jToolbar.add(jSpinner,24);
+% Add here 1 for each new button.
+jToolbar.add(Jbox,23);
+jToolbar.add(JCheckBox,24);
+jToolbar.add(jSpinner,27);
+
 
 %@bShow_Object_assignments
 
@@ -1522,8 +1677,12 @@ jToolbar.repaint;
 jToolbar.revalidate;
 
 
+htext=text(mean(get(ax,'xlim')),mean(get(ax,'ylim')), 'please wait',...
+    'HorizontalAlignment','Center','Parent',ax,'FontSize',32,'BackgroundColor','w');
 drawnow
 
+
+%%
 % retrieve some info for classification
 [rows,cols]=size(BW);
 tick_length=str2double(get(H.edit_tick_xlength,'String'));
@@ -1552,14 +1711,16 @@ end
 I_RGB=zeros(rows,cols,3,'uint8');
 I_RGB(:,:,1)=R; I_RGB(:,:,2)=G; I_RGB(:,:,3)=B;
 
+
 HIMRGB=image(I_RGB);
 drawnow
+delete(htext)
 
 BW0=BW;
 S0=S;
 
 
-mult_bck_color='w'; % color for textbox when multiple assignments.
+mult_bck_color=[0.7 0.7 0.7]; % NOT WHITE color for textbox when multiple assignments.
 iwithnuminS=[];
 imultiple_inS=[];
 hObjAssignmentLabel=[];
@@ -1568,8 +1729,6 @@ if isfield(S,'TraceNum')
     [S(ineg).TraceNum]=deal(-1);
     Update_AssignementLabelsfromS();
 end
-
-
 
 
 
@@ -1631,8 +1790,9 @@ end
         for i=1:length(hObjAssignmentLabel)
             hObjAssignmentLabel(i).BackgroundColor= cm(tempTN(i),:);
         end
-        hObjAssignmentLabel(imultiple_inS).BackgroundColor=mult_bck_color; % paint all with multiple assignments black
-        
+        if any(imultiple_inS)
+            hObjAssignmentLabel(imultiple_inS).BackgroundColor=mult_bck_color; % paint all with multiple assignments black
+        end
         
         Show_Object_assignments;
         drawnow
@@ -1676,8 +1836,6 @@ end
         Show_Object_assignments;
         drawnow
         
-        
-        
     end
 
 
@@ -1701,8 +1859,11 @@ end
             return
         end
         
-        if all(newassignment>=1 && newassignment<=length(pt_traces))
+        if all(newassignment>=1) && all(newassignment<=length(pt_traces))
             iobj=findobj(hObjAssignmentLabel,'Margin',4,'BackgroundColor',[1 1 1]);
+            if isempty(iobj)
+                return
+            end
             i=find(iobj==hObjAssignmentLabel,1);
             index=find(iwithnuminS);
             S(index(i)).TraceNum=newassignment;
@@ -1803,8 +1964,38 @@ end
     end
 
 
+
+    function deleteRedObjects(hObject, eventdata)
+        
+        button = questdlg('Are you sure you want to delete all noise objects?\n This action cannot be undone','Image polarity','Yes','No','No');
+        if strcmp(button,'No')
+            return;
+        end
+        
+        
+        ht=text(mean(get(ax,'xlim')),mean(get(ax,'ylim')), 'Removing noise, please wait',...
+            'HorizontalAlignment','Center','Parent',ax,'FontSize',32,'BackgroundColor','w');
+        drawnow;
+        
+        % remove reds
+        itoremove=[S.ID]==-1;
+        if sum(itoremove)>0
+            S([S.ID]==-1)=[];
+            update_classification_plot;
+        end
+        delete(ht)
+    end
+
+
+
+    function zoom2seismogramCLASS(hObject, eventdata)
+        set(ax,'Xlim',[1 size(BW,2)],'Ylim',[1,size(BW,1)])
+        drawnow;
+        Reset_MouseMotionMon;
+    end
+
     function zoom2region(hObject, eventdata)
-        set(H.ax1,'Xlim',get(ax,'Xlim'),'Ylim',get(ax,'Ylim'),'Xaxislocation','Top')
+        set(H.ax1,'Xlim',get(ax,'Xlim'),'Ylim',get(ax,'Ylim'))
         drawnow;
         Reset_MouseMotionMon;
     end
@@ -1880,10 +2071,11 @@ end
             bwtemp(sub2ind(size(bwtemp),i1-b0(2),j1-b0(1)))=true;
             Stemp=regionprops(bwtemp,'BoundingBox','PixelList');
             
+            nend=length(S);
             for i=1:length(Stemp)
-                S(end+1).PixelIdxList=...
+                S(nend+i).PixelIdxList=...
                     sub2ind(size(BW),Stemp(i).PixelList(:,2)+b0(2),Stemp(i).PixelList(:,1)+b0(1));
-                S(end).BoundingBox=...
+                S(nend+i).BoundingBox=...
                     [Stemp(i).BoundingBox(1)+b0(1),...
                     Stemp(i).BoundingBox(2)+b0(2),...
                     Stemp(i).BoundingBox(3), Stemp(i).BoundingBox(4)];
@@ -1892,18 +2084,18 @@ end
                 
                 % clasiffy it
                 if tick_length>0
-                    if abs(S(end).BoundingBox(3)-tick_length)<=tick_length_lim*tick_length;
-                        S(end).ID=1;
-                    elseif S(end).BoundingBox(3)-tick_length>tick_length_lim*tick_length;
-                        S(end).ID=0;
+                    if abs(S(nend+i).BoundingBox(3)-tick_length)<=tick_length_lim*tick_length;
+                        S(nend+i).ID=1;
+                    elseif S(nend+i).BoundingBox(3)-tick_length>tick_length_lim*tick_length;
+                        S(nend+i).ID=0;
                     else
-                        S(end).ID=-1;
+                        S(nend+i).ID=-1;
                     end
                 else
-                    if S(end).BoundingBox(3)+tick_length>tick_length_lim*(-tick_length);
-                        S(end).ID=0;
+                    if S(nend+i).BoundingBox(3)+tick_length>tick_length_lim*(-tick_length);
+                        S(nend+i).ID=0;
                     else
-                        S(end).ID=-1;
+                        S(nend+i).ID=-1;
                     end
                 end
             end
@@ -1964,21 +2156,18 @@ end
                         if tick_length>0
                             if abs(S(nend+i-1).BoundingBox(3)-tick_length)<=tick_length_lim*tick_length;
                                 S(nend+i-1).ID=1;
-                            elseif S(end).BoundingBox(3)-tick_length>tick_length_lim*tick_length;
+                            elseif S(nend+i-1).BoundingBox(3)-tick_length>tick_length_lim*tick_length;
                                 S(nend+i-1).ID=0;
                             else
                                 S(nend+i-1).ID=-1;
                             end
                         else
-                            if S(end).BoundingBox(3)+tick_length>tick_length_lim*(-tick_length);
+                            if S(nend+i-1).BoundingBox(3)+tick_length>tick_length_lim*(-tick_length);
                                 S(nend+i-1).ID=0;
                             else
                                 S(nend+i-1).ID=-1;
                             end
                         end
-                        
-                        
-                        
                     end
                     
                     return
@@ -1988,6 +2177,75 @@ end
         
         
     end
+
+    function idx=Classification_UpdateREMOVE_BREGION(linearIdx)
+        global tick_length_lim
+        idx=[];
+        tempS=[];
+        
+        %find affected objects
+        iok=cellfun(@(x) ~isempty(intersect(linearIdx,x)),{S.PixelIdxList});
+        idx=find(iok);
+        currentNofobjects=length(idx);
+        if ~any(iok)
+            idx=[];
+            return;
+        end
+        % create a sub-image with all these objects
+        BBox=reshape([S(iok).BoundingBox],4,currentNofobjects)';
+        PixelIdxList=cellfun(@(x) (x(:)), {S(iok).PixelIdxList},'UniformOutput',false);
+        PixelIdxList=cell2mat(PixelIdxList(:));
+        b0=[floor(min(BBox(:,1))) floor(min(BBox(:,2))),max(floor(BBox(:,1))+BBox(:,3)),max(floor(BBox(:,2))+BBox(:,4))];
+        b0(3:4)=[b0(3)-b0(1) b0(4)-b0(2)];
+        bwtemp=false(b0(4),b0(3));
+       
+        % apply remove region
+        [i1,j1]=ind2sub(size(BW),setdiff(PixelIdxList,linearIdx));
+        bwtemp(sub2ind(size(bwtemp),i1-b0(2),j1-b0(1)))=true;
+        
+        % recalculate objects
+        Stemp=regionprops(bwtemp,'BoundingBox','PixelList');
+        newNofobjects=length(Stemp);
+        
+        S(iok)=[];
+        nend=length(S);
+        
+        
+        %remove  affected objects from current structre
+        % put new objects after the end of S. % PETROS: this can be accelerated
+        for i=1:newNofobjects
+            S(nend+i).PixelIdxList=...
+                sub2ind(size(BW),Stemp(i).PixelList(:,2)+b0(2),Stemp(i).PixelList(:,1)+b0(1));
+            S(nend+i).BoundingBox=...
+                [Stemp(i).BoundingBox(1)+b0(1),...
+                Stemp(i).BoundingBox(2)+b0(2),...
+                Stemp(i).BoundingBox(3), Stemp(i).BoundingBox(4)];
+            
+            if tick_length>0
+                if abs(S(nend+i).BoundingBox(3)-tick_length)<=tick_length_lim*tick_length;
+                    S(nend+i).ID=1;
+                elseif S(nend+i).BoundingBox(3)-tick_length>tick_length_lim*tick_length;
+                    S(nend+i).ID=0;
+                else
+                    S(nend+i).ID=-1;
+                end
+            else
+                if S(nend+i).BoundingBox(3)+tick_length>(tick_length_lim*(-tick_length));
+                    S(nend+i).ID=0;
+                else
+                    S(nend+i).ID=-1;
+                end
+            end
+        end
+        
+        idx=nend+[1:newNofobjects];
+    end
+
+
+
+
+
+
 
 
 
@@ -2045,13 +2303,13 @@ end
                     if tick_length>0
                         if abs(S(nend+i-1).BoundingBox(3)-tick_length)<=tick_length_lim*tick_length;
                             S(nend+i-1).ID=1;
-                        elseif S(end).BoundingBox(3)-tick_length>tick_length_lim*tick_length;
+                        elseif S(nend+i-1).BoundingBox(3)-tick_length>tick_length_lim*tick_length;
                             S(nend+i-1).ID=0;
                         else
                             S(nend+i-1).ID=-1;
                         end
                     else
-                        if S(end).BoundingBox(3)+tick_length>tick_length_lim*(-tick_length);
+                        if S(nend+i-1).BoundingBox(3)+tick_length>(tick_length_lim*(-tick_length));
                             S(nend+i-1).ID=0;
                         else
                             S(nend+i-1).ID=-1;
@@ -2119,7 +2377,7 @@ end
 
 
     function update_BW_plot(linearInd,new_value)%hobject,eventdata)%(hObject, eventdata)
-        
+        % updates the 
         if new_value
             irej=cell2mat({S([S.ID]==-1).PixelIdxList}');
             itick=cell2mat({S([S.ID]==1).PixelIdxList}');
@@ -2146,6 +2404,42 @@ end
         
     end
 
+    function remove_bregion(hObject, eventdata)
+        
+        while strcmpi(get(bremove_bregion,'State'),'on')
+            hfh=imfreehand(ax,'closed',true);
+            hfh.Deletable = false;
+            try
+                mask=hfh.createMask;
+                delete(hfh);
+            catch
+                delete(hfh);
+                break
+            end
+                
+            % create undo point
+            S0=S;
+            BW0=BW;
+            set(bundo_last_action,'Enable','on');
+            
+            %update BW
+            
+            % update plot
+            linearIdx=find(mask);
+            BW(mask)=false;
+            update_BW_plot(linearIdx,false)
+             drawnow;
+            idx=Classification_UpdateREMOVE_BREGION(linearIdx);
+            if ~isempty(idx)
+                update_classification_plot(idx);
+                
+            end
+            drawnow;
+        end
+        
+        set(bremove_bregion,'State','off');
+        
+    end
 
 
     function remove_along_path(hObject, eventdata)
@@ -2153,8 +2447,13 @@ end
         while strcmpi(get(bremove_along_path,'State'),'on')
             
             hfh=imfreehand(ax,'closed',false);
-            
-            pos=hfh.getPosition;
+            hfh.Deletable = false;
+            try
+                pos=hfh.getPosition;
+            catch
+                delete(hfh); 
+                return
+            end
             
             if size(pos,1)<2 || strcmpi(get(bremove_along_path,'State'),'off')
                 delete(hfh);
@@ -2196,12 +2495,12 @@ end
             end
             drawnow;
             
-            
-            
         end
         
         set(bremove_along_path,'State','off');
     end
+
+
 
 
     function draw_along_path(hObject, eventdata)
@@ -2209,6 +2508,7 @@ end
         while strcmpi(get(bdraw_along_path,'State'),'on')
             
             hfh=imfreehand(ax,'closed',false);
+            hfh.Deletable = false;
             pos=hfh.getPosition;
             
             if strcmpi(get(bdraw_along_path,'State'),'off')
@@ -2423,28 +2723,36 @@ end
 
 
 function digitize_traces(hObject, eventdata)
-global H ptrace pt_traces itodigitize
+global H ptrace ptraceSTD pt_traces itodigitize
 
 itodigitize=1:length(pt_traces);
 if any(ishandle(ptrace))
     cancel_dig=true;
-    % select traces to be proccesed
+    %% select traces to be proccesed
     f = dialog('Units','Normalized','Position',[0.8 0.1 0.11 0.7],'Name','Select traces to digitize');
     columnname ='Digitize';
     columnformat = {'logical'};
     columneditable =  [true];
     tdata=false(numel(pt_traces),1); tdata(itodigitize)=true;
     t = uitable('Parent',f,'Units','normalized','Position',...
-        [0.0 0.1 1 0.89], 'Data',tdata,...
+        [0.0 0.14 1 0.84], 'Data',tdata,...
         'ColumnName', columnname,...
         'ColumnFormat', columnformat,...
         'ColumnEditable', columneditable,...
         'RowName',1:numel(pt_traces));
+    
     uicontrol('Style', 'pushbutton','Parent',f,'units','normalized',...
-        'String', 'Ok','Position', [0.05 0.02 0.3 0.05],'Callback',@select_traces_to_digitize);
+        'String', 'All','TooltipString','Click on all','Position', [0.05 0.075 0.3 0.05],'Callback',@select_tr);
+    uicontrol('Style', 'pushbutton','Parent',f,'units','normalized',...
+        'String', 'Odd','TooltipString','Click on the odd','Position', [0.35 0.075 0.3 0.05],'Callback',@select_tr);
+    uicontrol('Style', 'pushbutton','Parent',f,'units','normalized',...
+        'String', 'Even','TooltipString','Click on the even','Position', [0.65 0.075 0.3 0.05],'Callback',@select_tr);
+    
+    uicontrol('Style', 'pushbutton','Parent',f,'units','normalized',...
+        'String', 'Ok','Position', [0.05 0.02 0.35 0.05],'Callback',@select_traces_to_digitize);
     uicontrol('Style', 'pushbutton','Parent',f,'units','normalized',...
         'String', 'Cancel','Position', [0.4 0.02 0.55 0.05],'Callback',@cancel_digitizing);
-    
+    %%
     waitfor(f);
     
     if  cancel_dig
@@ -2454,20 +2762,24 @@ if any(ishandle(ptrace))
 else
     try
         delete(ptrace)
+        delete(ptraceSTD)
     end
     try
         delete(findobj(H.ax1,'Color',[0 .8 1]));
         delete(findobj(H.ax1,'Color',[0 .6 1]));
         delete(findobj(H.ax1,'Color',[1 .7 0]));
+        delete(findobj(H.ax1,'Color',[0.3 0.1 1])); % std
     end
     
     
     % create dummy traces update XData YData during digitization.
+    ptraceSTD=[];
     ptrace=[];
     bcol=1;col=[0 .6 1];
     hold(H.ax1,'on')
     for i=[itodigitize(:)]'
         ptrace(i)=plot(H.ax1,1,i,'-','color',col,'linewidth',2);
+        ptraceSTD(i)=plot(H.ax1,1,i,'-','color',[0.3 0.1 1],'linewidth',2);
         if bcol, bcol=0;col=[0 .8 1]; else bcol=1;col=[0 .6 1]; end
     end
 end
@@ -2487,6 +2799,22 @@ end
 
 
 %%%%%%%%% functions for the buttons of selection figure.
+function select_tr(hObject, eventdata)
+   tdata=get(t,'data');
+   if strcmpi(get(hObject,'String'), 'All')
+    tdata(1:numel(tdata))= ~tdata(1:numel(tdata));
+   elseif strcmpi(get(hObject,'String'), 'Odd')
+    tdata(1:2:numel(tdata)-1)= ~tdata(1:2:numel(tdata)-1);
+   elseif strcmpi(get(hObject,'String'), 'Even')
+    tdata(2:2:numel(tdata))= ~tdata(2:2:numel(tdata));
+   else
+       error('Wrong selection (it should never gets here)')
+   end
+   set(t,'data',tdata);    
+    
+end
+
+
 
     function select_traces_to_digitize(hObject, eventdata)
         dat=get(t,'data');
@@ -2505,7 +2833,7 @@ end
 
 
 function digitize_traces_without_assignments(hObject, eventdata)
-global H I0 ftrend pt_traces ptrace S output_message itodigitize
+global H I0 ftrend pt_traces ptrace ptraceSTD S output_message itodigitize
 
 % retrieve values from GUI
 %luminance_thershold=str2double(get(H.edit_luminance,'string'));
@@ -2580,7 +2908,14 @@ for i=[itodigitize(:)]' %1:numel(pt_traces)
     tempNULL=temp;
     
     [i1,j1]=ind2sub([rows,cols],cell2mat({Strace(itrace_i).PixelIdxList}'));
-    iok=i1>=rstart & i1<=rend;
+    try
+        iok=i1>=rstart & i1<=rend;
+    catch
+        warning('Possible problem during digitization. of trace# %d. No assigned objects were found.',i)
+        output_message{end}=['skipping ' num2str(find(i==itodigitize)) '/' num2str(numel(itodigitize))];
+        set(H.output_mess,'String',output_message,'Value',length(output_message)); drawnow
+        continue
+    end
     temp(sub2ind(size(temp),i1(iok)-rstart+1,j1(iok)))=true;
     
     [i1,j1]=ind2sub([rows,cols],cell2mat({Stick(itick_i).PixelIdxList}'));
@@ -2590,7 +2925,7 @@ for i=[itodigitize(:)]' %1:numel(pt_traces)
     x=round(get(pt_traces(i),'XDATA'));
     y=round(get(pt_traces(i),'YDATA'))-rstart+1;
     if (y(1))<=0
-      y=y -y(1)+1;
+        y=y -y(1)+1;
     end
     
     
@@ -2601,9 +2936,9 @@ for i=[itodigitize(:)]' %1:numel(pt_traces)
     
     for ix=1:numel(x)
         if x(ix)>0 && x(ix)<size(Itemp,2);
-            stripe(y(ix)+ [1:buff],ix)=Itemp(:,x(ix));
-            bstripe(y(ix)+ [1:buff],ix)= temp(:,x(ix));
-            bstripe_tick(y(ix)+ [1:buff],ix)= tempNULL(:,x(ix));
+            stripe(max(1,y(ix)+ [1:buff]),ix)=Itemp(:,x(ix));
+            bstripe(max(1,y(ix)+ [1:buff]),ix)= temp(:,x(ix));
+            bstripe_tick(max(1,y(ix)+ [1:buff]),ix)= tempNULL(:,x(ix));
         else
             warning('Possible problem during digitization. report that: x(ix)=%d (it should be between 1 and %d), trace# %d',x(ix),size(Itemp,2),i)
         end
@@ -2614,17 +2949,17 @@ for i=[itodigitize(:)]' %1:numel(pt_traces)
     set(H.output_mess,'String',output_message,'Value',length(output_message)); drawnow
     
     if str2double(get(H.edit_tick_xlength,'String'))>0
-        YDATA=digitize_trace_and_tickmarks(stripe,stripe,bstripe,bstripe_tick); % stripe and stripe NULL are the same
+        [YDATA,YDATASTD]=digitize_trace_and_tickmarks(stripe,stripe,bstripe,bstripe_tick); % stripe and stripe NULL are the same
     else
-        YDATA=digitize_trace_without_tickmarks(stripe,bstripe);
+        [YDATA,YDATASTD]=digitize_trace_without_tickmarks(stripe,bstripe);
     end
-    
-    
     
     XDATA=x; % correct for real starting point
     YDATA=YDATA-y + rstart - 1;
+    YDATASTD=YDATASTD+YDATA;
     
     set(ptrace(i),'XData',XDATA,'YData',YDATA);
+    set(ptraceSTD(i),'XData',XDATA,'YData',YDATASTD); %std
     
 end
 hold(H.ax1,'off')
@@ -2642,7 +2977,7 @@ end
 
 
 function digitize_traces_with_assignments(hObject, eventdata)
-global H I0 pt_traces ptrace S output_message itodigitize
+global H I0 pt_traces ptrace ptraceSTD S output_message itodigitize
 
 
 [rows,cols]=size(I0);
@@ -2667,7 +3002,7 @@ for i=[itodigitize(:)]' %1:numel(pt_traces)
     
     % update axwait
     
-    temp=find(i==itodigitize)/numel(itodigitize);   oxi I ALLA INDX(I)
+    temp=find(i==itodigitize)/numel(itodigitize);  % oxi I ALLA INDX(I)
     h=pie(H.axwait,[1-temp+eps, temp],{'',''});
     set(h(3),'EdgeColor','none');
     set(h(1),'EdgeColor','None','FaceColor',[0.3 0.3 0.3]);
@@ -2711,9 +3046,9 @@ for i=[itodigitize(:)]' %1:numel(pt_traces)
     
     for ix=1:numel(x)
         if x(ix)>0 && x(ix)<size(Itemp,2);
-            stripe(y(ix)+ [1:buff],ix)=Itemp(:,x(ix));
-            bstripe(y(ix)+ [1:buff],ix)= temp(:,x(ix));
-            bstripe_tick(y(ix)+ [1:buff],ix)= tempNULL(:,x(ix));
+            stripe(max(1,y(ix)+ [1:buff]),ix)=Itemp(:,x(ix));
+            bstripe(max(1,y(ix)+ [1:buff]),ix)= temp(:,x(ix));
+            bstripe_tick(max(1,y(ix)+ [1:buff]),ix)= tempNULL(:,x(ix));
         else
             warning('Possible problem during digitization. report that: x(ix)=%d (it should be between 1 and %d), trace# %d',x(ix),size(Itemp,2),i)
         end
@@ -2724,16 +3059,17 @@ for i=[itodigitize(:)]' %1:numel(pt_traces)
     
     
     if str2double(get(H.edit_tick_xlength,'String'))>0
-        YDATA=digitize_trace_and_tickmarks(stripe,stripe,bstripe,bstripe_tick); % stripe and stripe NULL are the same
+        [YDATA,YDATASTD]=digitize_trace_and_tickmarks(stripe,stripe,bstripe,bstripe_tick); % stripe and stripe NULL are the same
     else
-        YDATA=digitize_trace_without_tickmarks(stripe,bstripe);
+        [YDATA,YDATASTD]=digitize_trace_without_tickmarks(stripe,bstripe);
     end
-    
     
     XDATA=x; % correct for real starting point
     YDATA=YDATA-y + rstart - 1;
+    YDATASTD=YDATASTD+YDATA;
     
     set(ptrace(i),'XData',XDATA,'YData',YDATA);
+    set(ptraceSTD(i),'XData',XDATA,'YData',YDATASTD);
     
 end
 hold(H.ax1,'off')
@@ -2757,19 +3093,18 @@ end
 %%
 
 function correct_trace(hObject, eventdata)
-global H I0 pt_traces ptrace
+global H I0 pt_traces ptrace ptraceSTD ftrend
 % initialize
 BWstripe=[];
 BWstripeNULL=[];
-
-[rows,cols]=size(I0);
+BWS=[];
 number_of_traces=numel(pt_traces);
 
 % Select trace with mouse
-h=msgbox('Click on the trace you want to correct','Correct trace','help',[],'WindowStyle','modal');
+h=msgbox('Click with mouse anywhere on the trace you want to correct.','Correct trace','help',[],'WindowStyle','modal');
 waitfor(h);
-[xc,yc]=ginput(1);
 
+[xc,yc]=ginput(1);
 
 % Find the trace number
 d=zeros(number_of_traces,1);
@@ -2778,25 +3113,31 @@ for i=1:number_of_traces
 end
 [~,iTRACE]=min(d);
 x=round(get(pt_traces(iTRACE),'XDATA'));
-y=round(get(pt_traces(iTRACE),'YDATA'));
 
-% create imline to get upper and lower limits
-hdist = imdistline(gca,[xc xc],yc+[-200 200]);
-api = iptgetapi(hdist);
-fcn = makeConstrainToRectFcn('imline',[xc xc],get(gca,'YLim'));
+position=[max(1,xc-300) max(1,yc-70) 600 140];
+position(3)=min(size(I0,2)-position(1),position(3));
+position(4)=min(size(I0,1)-position(2),position(4));
+
+
+
+% create rectangle to get the problematic patch
+hrec = imrect(gca,position);
+api = iptgetapi(hrec);
+fcn = makeConstrainToRectFcn('imrect',get(gca,'Xlim'),get(gca,'YLim'));
 api.setDragConstraintFcn(fcn);
-position=wait(hdist);
-delete(hdist);
-offset=round(abs(position(2,2)- position(1,2))/2);
-offset=-offset:offset;
-stripe=zeros(numel(offset),numel(x),'uint8');
+position=wait(hrec);
+delete(hrec);
+position=round(position);
+stripe=imcrop(I0,position);
 [r,c]=size(stripe);
-for ix=1:numel(x)
-    stripe(:,ix)=I0(min(max(1,y(ix)+offset),rows),x(ix)); % Take from I
-end
+
+xpatch=position(1)+[0:position(3)];
+xpatch=xpatch(xpatch>=x(1) & xpatch<=x(end));
+ypatch=position(2)+[0:position(4)];
 
 
-% Launch GUI for single trace analysis and digitization
+
+%% Launch GUI for single trace analysis and digitization
 h1stripe.f=figure('Color','w','WindowStyle','normal','Name',['Edit trace ' num2str(iTRACE)] ,'NumberTitle','Off',...
     'Menubar','none','ToolBar','figure','Units','Normalized','Position',[0.1 0.5 0.8 0.3]);
 
@@ -2807,14 +3148,13 @@ delete(temp([2:7 9 13 16 17]));
 % set(temp(1),'Children',[temp(4:end-1);temp(2:3);temp(end)])
 
 % add some tools
-bColorSchemeS=uitoggletool(temp(1),'Tag','Select region','Cdata',imread('ColorScheme.png','BackgroundColor',[1 1 1]),...
-    'Separator','on','TooltipString','Draw a region to remove',...
+bColorSchemeS=uitoggletool(temp(1),'Tag','Change colors','Cdata',imread('ColorScheme.png','BackgroundColor',[1 1 1]),...
+    'Separator','on','TooltipString','Change classification colors',...
     'HandleVisibility','off','ClickedCallback',@update_classplotS);
 
-%
-% uipushtool(temp(1),'Tag','Select region','Cdata',imread('selectS.png','BackgroundColor',[1 1 1]),...
-%     'Separator','on','TooltipString','Draw a region to remove',...
-%     'HandleVisibility','on','ClickedCallback',@select_regionS);
+uipushtool(temp(1),'Tag','Select region mirrored','Cdata',imread('contrast-icon.png','BackgroundColor',[1 1 1]),...
+    'Separator','on','TooltipString','Adjust contrast',...
+    'HandleVisibility','on','ClickedCallback',@adjust_contrastS);
 
 uipushtool(temp(1),'Tag','Select region mirrored','Cdata',imread('select_MirrorS.png','BackgroundColor',[1 1 1]),...
     'Separator','on','TooltipString','Draw a symmetric region',...
@@ -2844,13 +3184,18 @@ uipushtool(temp(1),'Tag','s2Timemark','Cdata',imread('timemark.png','BackgroundC
 uipushtool(temp(1),'Tag','s2Trace','Cdata',imread('trace.png','BackgroundColor',[1 1 1]),...
     'Separator','on','TooltipString','Select object to ckassify as trace',...
     'HandleVisibility','on','ClickedCallback',@modify_classification,'Enable','off');
+hbut_draw=uipushtool(temp(1),'Tag','drawmask','Cdata',zeros(16,16,3,'uint8'),... %imread('drawmask.png','BackgroundColor',[1 1 1])
+    'Separator','on','TooltipString','Click to create a mask for the current trace (currently inactive)',...
+    'HandleVisibility','on','ClickedCallback',@drawmask,'Enable','off');
+redbt=zeros(16,16,3,'uint8'); redbt(:,:,1)=255;
+uipushtool(temp(1),'Tag','s2Trace','Cdata',redbt,...
+    'Separator','on','TooltipString','Recalculate classification',...
+    'HandleVisibility','on','ClickedCallback',@CaLLClassify_from_scratchS,'Enable','off');
+clear redbt;
 
-
-
-
-uipushtool(temp(1),'Tag','Digitize trace','Cdata',imread('digitize1.png','BackgroundColor',[1 1 1]),...
+hbdigitize_single=uipushtool(temp(1),'Tag','Digitize trace','Cdata',imread('digitize1.png','BackgroundColor',[1 1 1]),...
     'Separator','on','TooltipString','Digitize trace',...
-    'HandleVisibility','on','ClickedCallback',@Digitize_Single,'Enable','on');
+    'HandleVisibility','on','ClickedCallback',@Digitize_Single,'Enable','off');
 
 
 h1stripe.tbar=findall(findall(h1stripe.f,'Type','uitoolbar'));
@@ -2871,36 +3216,37 @@ h1stripe.tbar=findall(findall(h1stripe.f,'Type','uitoolbar'));
 % 10   'Select region mirrored'
 % 11   'Select region'
 
-% 12   'Exploration.DataCursor'
-% 13   'Exploration.Pan'
-% 14   'Exploration.ZoomOut'
-% 15   'Exploration.ZoomIn'
-% 16   'Standard.PrintFigure'
-% 17   'Standard.SaveFigure'
+% 12   ''
+% 13   'Exploration.DataCursor'
+% 14   'Exploration.Pan'
+% 15   'Exploration.ZoomOut'
+% 16   'Exploration.ZoomIn'
+% 17   'Standard.PrintFigure'
+% 18   'Standard.SaveFigure'
 
 
 
-h1stripe.axI=axes('Units','Normalized','Position',[0.02 0.12 0.979 0.88],...
+h1stripe.axI=axes('Units','Normalized','Position',[0.05 0.2 0.94 0.79],...
     'Xtick',[],'Ytick',[],'box','on','Parent',h1stripe.f);
 
 h1stripe.applyb=uicontrol('Style', 'pushbutton','Parent',h1stripe.f,'units','normalized',...
-    'String', 'Apply','Position', [0.848 0.001 0.10 0.06],'Callback',@Apply_to_main);
-h1stripe.cancel=uicontrol('Style', 'pushbutton','Parent',h1stripe.f,'units','normalized',...
-    'String', 'Cancel','Position', [0.948 0.001 0.05 0.06],'Callback',@Cancel_whitout_applying);
-
+    'String', 'Apply','Position', [0.81 0.001 0.07 0.07],'Callback',@Apply_to_main);
+h1stripe.close=uicontrol('Style', 'pushbutton','Parent',h1stripe.f,'units','normalized',...
+    'String', 'Close','Position', [0.881 .001 0.07 0.07],'Callback',@Closethefigure);
 
 SCLA=[];
 
 % plot trace
-image(stripe), colormap(gray(256));
+image(xpatch,ypatch,stripe); colormap(gray(256));
+
+
 
 
 
     function update_plotS(hObject, eventdata)
         xylimits=axis;
-        cm=colormap;
         cla
-        imagesc(stripe),colormap(cm);
+        imagesc(xpatch,ypatch,stripe,'Parent',h1stripe.axI),colormap(h1stripe.axI,gray(256));
         axis(xylimits);
     end
 
@@ -2916,6 +3262,7 @@ image(stripe), colormap(gray(256));
         set(h1stripe.f,'WindowScrollWheelFcn','')
         
         h=imfreehand(h1stripe.axI);
+        h.Deletable = false;
         stripe0=stripe; % save an undo copy
         stripe(h.createMask)=0;
         update_plotS;
@@ -2934,6 +3281,7 @@ image(stripe), colormap(gray(256));
         set(h1stripe.f,'WindowScrollWheelFcn','')
         
         h=imfreehand(h1stripe.axI);
+        h.Deletable = false;
         stripe0=stripe; % save an undo copy
         stripe(~[h.createMask])=0;
         update_plotS
@@ -2953,14 +3301,16 @@ image(stripe), colormap(gray(256));
         
         
         h=imfreehand(h1stripe.axI,'Closed',false);
+        h.Deletable = false;
         pos=h.getPosition;
         delete(h);
         [xx,iun]=unique(pos(:,1));
         yy=pos(iun,2);
-        xq=linspace(1,c,min(size(xx,1),10))';
-        yq=interp1(xx,yy,xq,'pchip');
-        pos=[xq yq;flipud([xq r-yq])];
+        xq=linspace(xpatch(1),xpatch(end),min(size(xx,1),12))';
+        yq=interp1(xx,yy,xq,'linear','extrap');
+        pos=[xq yq;flipud([xq [ypatch(1)-yq+ypatch(end)]])];
         h=impoly(h1stripe.axI,pos);
+        h.Deletable = false;
         wait(h);
         
         stripe0=stripe; % save an undo copy
@@ -2983,9 +3333,10 @@ image(stripe), colormap(gray(256));
         
         
         hfh=imfreehand(h1stripe.axI,'closed',false);
+        hfh.Deletable = false;
         pos=hfh.getPosition;
-        [cx,cy,~] = improfile(stripe,pos(:,1),pos(:,2));
-        linearInd = sub2ind([r,c], round(cy),round(cx));
+        [cx,cy,~] = improfile(xpatch,ypatch,stripe,pos(:,1),pos(:,2));
+        linearInd = sub2ind([r,c], min(r,max(1,round(cy-ypatch(1)+1))),min(c,max(1,round(cx-xpatch(1)+1))));
         stripe(linearInd)=0;
         delete(hfh);
         update_plotS
@@ -2998,84 +3349,214 @@ image(stripe), colormap(gray(256));
         global stripe0
         stripe=stripe0;
         update_plotS;
+        drawnow;
         set(htundo,'Enable','off');
     end
 
 
+    function adjust_contrastS(hObject, eventdata)
+        global stripe0
+        stripe0=stripe;
+        hFig = figure('Color','w','NumberTitle','off','Toolbar','none',...
+            'Menubar','none','Visible','off','closerequestfcn','','Name',['Trace ' num2str(iTRACE)]);
+        hIm = imshow(stripe);
+        hSP = imscrollpanel(hFig,hIm);
+        set(hSP,'Units','normalized',...
+            'Position',[0.0 0.05 1 .95])
+        hMagBox = immagbox(hFig,hIm);
+        pos = get(hMagBox,'Position');
+        set(hMagBox,'Position',[0 0 pos(3) pos(4)])
+        %imoverview(hIm0);
+        hImCon=imcontrast(hIm);
+        set(hFig,'Visible','on')
+        waitfor(hImCon);
+        stripe=get(hIm,'Cdata');
+        update_plotS;
+        drawnow
+        delete(hFig);
+        % enable undo
+        set(htundo,'Enable','on');
+    end
+
+
+
+
+
+
     function SeperateS(hObject, eventdata)
-        global tick_length_lim
+        % Go to classification mode, if 1st time create classification
         
         if strcmpi(get(hObject,'State'),'ON')
             
             %        set([h1stripe.Bremove_region,h1stripe.Bselect_region,h1stripe.Bselect_region_mirror,h1stripe.BSeperate,h1stripe.BUndo],'Enable','off')
-            set(h1stripe.tbar([2 7:10]),'Enable','off');
-            set(h1stripe.tbar([3:5]),'Enable','on');
+            set(h1stripe.tbar([2 9:12]),'Enable','off');
+            set(h1stripe.tbar([3:7]),'Enable','on');
             
-            level=str2double(get(H.edit_luminance,'string'));
-            % maxarea=800; minarea=30;
-            tick_length=str2double(get(H.edit_tick_xlength,'String'));
-            if isnan(tick_length)
-                errordlg('Invalid length of time marks!','Error!')
-                return
-            end
             
-            sh=smooth(sum(stripe,2));
-            [~,imax]=max(sh);
-            
-            %window=[min(128,size(stripe,1)),min(128,size(stripe,2))];
-            BW=im2bw(stripe,level/100);
-            
-            % calculate initial classification
-            SCLA=regionprops(BW,{'Centroid','BoundingBox','PixelIdxList'});
-            
-            time_length=cell2mat({SCLA.BoundingBox}');
-            time_length=time_length(:,3)';% tale width;
-            
-            temp1=cell2mat({SCLA.Centroid}'); temp1=temp1(:,2)';
-            %idRej=time_length-tick_length>5 | (abs(tick_length-time_length)<=5  & temp1>imax);
-            
-            if tick_length>0
-                if  strcmpi(get(H.timemarkpos,'State'),'off') % time marks above the trace
-                    idTick=abs(time_length-tick_length)<=tick_length_lim*tick_length & temp1<=imax;
-                elseif strcmpi(get(H.timemarkpos,'State'),'on')  % time marks bellow the trace
-                    idTick=abs(time_length-tick_length)<=tick_length_lim*tick_length & temp1>=imax;
-                else % It should never go to else
-                    error('Problem with time marks button status')
-                end
+            if isempty(get(hObject,'UserData'))
+                Classify_from_scratchS;
+                set(hObject,'UserData',1)
             else
-                idTick=[];
+                update_classplotS;
             end
-            
-            
-            idTrace=time_length-tick_length>tick_length_lim*tick_length;
-            
-            % add classification
-            [SCLA(idTrace).ID]=deal(0);
-            [SCLA(idTick).ID]=deal(1);
-            idRej=cellfun(@(xvar) isempty(xvar),{SCLA.ID});
-            [SCLA(idRej).ID]=deal(-1);
-            %             rejected_indx=cell2mat({SCLA(idRej).PixelIdxList}');
-            %             tick_indx=cell2mat({SCLA(idTick).PixelIdxList}');
-            %             main_indx=cell2mat({SCLA(idTrace).PixelIdxList}');
-            %
-            irej=cell2mat({SCLA([SCLA.ID]==-1).PixelIdxList}');
-            itick=cell2mat({SCLA([SCLA.ID]==1).PixelIdxList}');
-            itrace=cell2mat({SCLA([SCLA.ID]==0).PixelIdxList}');
-            
-            update_classplotS(itrace,itick,irej);
-            
-            %% create outputs
-            BWstripe=false(r,c); BWstripe(itrace)=true;
-            BWstripeNULL=false(r,c); BWstripeNULL(itick)=true;
             
         else
             
             update_plotS;
-            set(h1stripe.tbar([2 7:10]),'Enable','on');
-            set(h1stripe.tbar([3:5]),'Enable','off');
-            
+            set(h1stripe.tbar([2 9:12]),'Enable','on');
+            set(h1stripe.tbar([3:7]),'Enable','off');
+        end
+        set(hbut_draw,'Enable','off'); % not ready yet. 
+    end
+
+    function CaLLClassify_from_scratchS(hObject, eventdata)
+        
+        button = questdlg({'Are you sure you want to recalculate classification?';'Current classification will be lost!'},'Confirmation','Yes','No','No');
+        if strcmpi(button,'NO')
+            return
+        else
+            Classify_from_scratchS;
         end
     end
+
+    function Classify_from_scratchS(BW)
+        % create binary and calculate classification. Previous values are lost.
+        global tick_length_lim
+        
+        level=str2double(get(H.edit_luminance,'string'));
+        tick_length=str2double(get(H.edit_tick_xlength,'String'));
+        if isnan(tick_length)
+            errordlg('Invalid length of time marks!','Error!')
+            return
+        end
+        
+        sh=smooth(sum(stripe,2));
+        [~,imax]=max(sh);
+        
+        if nargin==1
+            BWS=BW;
+        else
+            BWS=im2bw(stripe,level/100);
+        end
+        % calculate initial classification
+        SCLA=regionprops(BWS,{'Centroid','BoundingBox','PixelIdxList'});
+        
+        time_length=cell2mat({SCLA.BoundingBox}');
+        time_length=time_length(:,3)';% tale width;
+        
+        temp1=cell2mat({SCLA.Centroid}'); temp1=temp1(:,2)';
+        %idRej=time_length-tick_length>5 | (abs(tick_length-time_length)<=5  & temp1>imax);
+        
+        if tick_length>0
+            if  strcmpi(get(H.timemarkpos,'State'),'off') % time marks above the trace
+                idTick=abs(time_length-tick_length)<=tick_length_lim*tick_length & temp1<=imax;
+            elseif strcmpi(get(H.timemarkpos,'State'),'on')  % time marks bellow the trace
+                idTick=abs(time_length-tick_length)<=tick_length_lim*tick_length & temp1>=imax;
+            else % It should never go to else
+                error('Problem with time marks button status')
+            end
+        else
+            idTick=[];
+        end
+        
+        
+        idTrace=time_length-tick_length>tick_length_lim*tick_length;
+        
+        % add classification
+        [SCLA(idTrace).ID]=deal(0);
+        [SCLA(idTick).ID]=deal(1);
+        idRej=cellfun(@(xvar) isempty(xvar),{SCLA.ID});
+        [SCLA(idRej).ID]=deal(-1);
+        %             rejected_indx=cell2mat({SCLA(idRej).PixelIdxList}');
+        %             tick_indx=cell2mat({SCLA(idTick).PixelIdxList}');
+        %             main_indx=cell2mat({SCLA(idTrace).PixelIdxList}');
+        %
+        irej=cell2mat({SCLA([SCLA.ID]==-1).PixelIdxList}');
+        itick=cell2mat({SCLA([SCLA.ID]==1).PixelIdxList}');
+        itrace=cell2mat({SCLA([SCLA.ID]==0).PixelIdxList}');
+        
+        update_classplotS(itrace,itick,irej);
+        
+        %% create outputs
+        BWstripe=false(r,c); BWstripe(itrace)=true;
+        BWstripeNULL=false(r,c); BWstripeNULL(itick)=true;
+
+        set(hbdigitize_single,'Enable','on')
+    end
+
+
+    function drawmask(hObject, eventdata)
+        
+        %         % First try this
+        %         BW2= imerode(BWS,strel('line',6,0));
+        %         BW2 = BWS & ~imdilate(bwareaopen(BW2,60),strel('line',10,90));
+        %
+        %
+        %         % then this one
+        %         param1=40; % this can change...
+        %         % create segments
+        %         BW2= bwmorph(bwmorph(BWS,'tophat'),'clean',inf);
+        %         BW2=imdilate(BW2,strel('disk', 6,0));
+        %         BW2 = bwareaopen(BW2,param1);
+        %         BW3=BW2;
+        %         BW2= BWS & ~BW2;
+        %         BW2 = bwareaopen(BW2,param1);
+        %         BW3=imdilate(BW3,strel('diamond', 3));
+        %
+        %         Target=stripe;
+        %         Target(~BW3)=0;
+        %         figure;imshow([BW2;BW3])
+        %
+        %         tol=0.1;
+        %         yyy=digitize_region(double(Target),tol);
+        %
+        %         iok=~isnan(yyy);
+        %         xxx=x(iok); yyy=yyy(iok);
+        %
+        %         xi=x(1):4:x(end);
+        %         yi=interp1(xxx,yyy,xi);
+        %         hpoly = impoly(gca, [xi;yi]','closed',false,'Deletable',false);
+        
+        
+        hmfree = imfreehand(gca,'closed',false);
+        hmfree.Deletable=false;
+        pos=double(hmfree.getPosition);
+        delete(hmfree);
+        pxfree=linspace(min(pos(:,1)),max(pos(:,1)),numel(min(pos(:,1)):max(pos(:,1))),25);
+        
+        hpoly = impoly(gca, pos,'closed',false);
+        hpoly.Deletable=false;
+        pos=double(round(wait(hpoly)));
+        delete(hpoly);
+        
+        answer = inputdlg('Enter thickness of traced line (an integer>0. Enter 0 to cancel and return to manual classification)',...
+            'Traced line thickness',1,{'2'});
+        answer = double(round(str2double(answer)));
+        if answer<=0
+            return
+        end
+        
+        BW=0*BWS;
+        [cx,cy,~] = improfile(BWS,pos(:,1),pos(:,2));
+        linearInd = sub2ind([r,c], min(r,max(1,round(cy-ypatch(1)+1))),min(c,max(1,round(cx-xpatch(1)+1))));
+        BW(linearInd)=1;
+        BW=imdilate(BW,strel('disk', answer,0));
+        BWS=BW & BWS;
+        
+        Classify_from_scratchS(BW)
+        
+        %imshow(BW);
+        
+        % temp=imcomplement(I01(1:end-1,1:end-1));
+        % temp(~BW2)= 255;
+        % imshow(temp)
+        % title('top-bottom traces')
+        % axis on
+        % set(gca,'Xtick',[],'Ytick',[])
+        
+        
+    end
+
 
     function modify_classification(hObject, eventdata)
         
@@ -3090,20 +3571,22 @@ image(stripe), colormap(gray(256));
             error('Problem in modify classification, single trace')
         end
         
-        %[colSub,rowSub]=ginput(1);
-        [colSub,rowSub]=ginput(1);
-        linearInd = sub2ind([r,c], round(rowSub), round(colSub));
-        for iter=1:length(SCLA)
-            if any(linearInd==SCLA(iter).PixelIdxList)
-                SCLA(iter).ID=id;
-                break;
+        [colSub,rowSub,butt]=ginput(1);
+        while butt==1
+            linearInd = sub2ind([r,c], min(r,round(max(1,rowSub-ypatch(1)+1))),round(min(c,max(1,colSub-xpatch(1)+1))));
+            for iter=1:length(SCLA)
+                if any(linearInd==SCLA(iter).PixelIdxList)
+                    SCLA(iter).ID=id;
+                    update_classplotS;
+                    break;
+                end
             end
+            [colSub,rowSub,butt]=ginput(1);
         end
         
         irej=cell2mat({SCLA([SCLA.ID]==-1).PixelIdxList}');
         itick=cell2mat({SCLA([SCLA.ID]==1).PixelIdxList}');
         itrace=cell2mat({SCLA([SCLA.ID]==0).PixelIdxList}');
-        
         
         %% modify plot and outputs
         update_classplotS(itrace,itick,irej);
@@ -3140,18 +3623,19 @@ image(stripe), colormap(gray(256));
         stripeRGB=zeros(r,c,3,'uint8');
         stripeRGB(:,:,1)=R; stripeRGB(:,:,2)=G; stripeRGB(:,:,3)=B;
         
-        xl=get(h1stripe.axI,'xlim');
-        yl=get(h1stripe.axI,'ylim');
+        %         xl=get(h1stripe.axI,'xlim');
+        %         yl=get(h1stripe.axI,'ylim');
         
         hold(h1stripe.axI,'off')
-        imagesc(stripeRGB,'parent',h1stripe.axI)
-        hold(h1stripe.axI,'on')
-        %plot(1:c,repmat(imax,1,c),'y')
-        plot(h1stripe.axI,200,20,'rsq','MarkerFaceColor','r','MarkerSize',10),text(600,20,'Rejected objects','Color','w')
-        plot(h1stripe.axI,200,50,'gsq','MarkerFaceColor','g','MarkerSize',10),text(600,50,'Time-marks','Color','w')
-        plot(h1stripe.axI,200,80,'wsq','MarkerFaceColor','w','MarkerSize',10),text(600,80,'Main trace','Color','w')
-        set(h1stripe.axI,'Xlim',xl,'Ylim',yl);
-        hold(h1stripe.axI,'off')
+        imagesc(xpatch,ypatch,stripeRGB,'parent',h1stripe.axI)
+        %        hold(h1stripe.axI,'on')
+        %        %plot(1:c,repmat(imax,1,c),'y')
+        %         plot(h1stripe.axI,200,20,'rsq','MarkerFaceColor','r','MarkerSize',10),text(600,20,'Rejected objects','Color','w')
+        %         plot(h1stripe.axI,200,50,'gsq','MarkerFaceColor','g','MarkerSize',10),text(600,50,'Time-marks','Color','w')
+        %         plot(h1stripe.axI,200,80,'wsq','MarkerFaceColor','w','MarkerSize',10),text(600,80,'Main trace','Color','w')
+        %         set(h1stripe.axI,'Xlim',xl,'Ylim',yl);
+        %        hold(h1stripe.axI,'off')
+        drawnow
     end
 
 
@@ -3160,7 +3644,7 @@ image(stripe), colormap(gray(256));
 
     function Digitize_Single(hObject, eventdata)
         global output_message %BWstripe BWstripeNULL
-        global pt_single
+        global pt_single pt_singleSTD
         
         try delete(pt_single), end
         
@@ -3169,12 +3653,18 @@ image(stripe), colormap(gray(256));
         set(H.output_mess,'String',output_message,'Value',length(output_message)); drawnow
         
         % digitize
-        yy=digitize_trace_and_tickmarks(stripe,stripe,BWstripe,BWstripeNULL);
+        [yy,yySTD]=digitize_trace_and_tickmarks(stripe,stripe,BWstripe,BWstripeNULL);
         
+        % for patch
+        yy=yy+min(ypatch);
+        yySTD=yySTD+yy;
         
         % plot at current gui
         hold(h1stripe.axI,'on')
-        pt_single=plot(h1stripe.axI,x-x(1)+1,yy,'-','color',[1 .7 0],'linewidth',2);
+        pt_single=plot(h1stripe.axI,xpatch,yy,'-','color',[1 .7 0],'linewidth',2);
+        pt_singleSTD=plot(h1stripe.axI,xpatch,yySTD,'-','color',[0.3 .1 1],'linewidth',2);
+        
+        
         hold(h1stripe.axI,'off')
         
         % update user
@@ -3183,16 +3673,47 @@ image(stripe), colormap(gray(256));
     end
 
     function Apply_to_main(hObject, eventdata)
-        global pt_single
+        global pt_single pt_singleSTD
         yy=get(pt_single,'YDATA');
+        yySTD=get(pt_singleSTD,'YDATA');
         
+        
+        button = questdlg({['Click at "Skip NaNs" if you want to skip NaN values ',...
+            'returned from the digitization. If you click at "Include NaNs" then NaNs will be included.']},...
+            'NaN numbers','Skip NaNs','Include NaNs','Skip NaNs');
+        if strcmpi(button,'Skip NaNs')
+            %replace nans in yy and yySTD with the current value of the trace
+            notanan=~isnan(yy);
+            yy=yy(notanan);
+            yySTD=yySTD(notanan);
+            xpatch=xpatch(notanan);
+        end
+        
+        ptraceSTD_EXISTS=true;
+        try
+         yitraceSTD=get(ptraceSTD(iTRACE),'YData');
+        catch
+         ptraceSTD_EXISTS=false;
+         errordlg('Could not find handles for digitized traces STD. If this file is from an older version of DigitSeis without this feature, ignore this message');
+        end
+            
+        yitrace=get(ptrace(iTRACE),'YData');
+        [~,iok,iokxpatch] = intersect(x,xpatch);
+        
+        yitrace(iok)=yy(iokxpatch);%+ftrend(xpatch(iokxpatch))';
         % update traces
-        set(ptrace(iTRACE),'XData',x,'YData',yy+y+min(offset),'color',[1 .7 0])
+        set(ptrace(iTRACE),'XData',x,'YData',yitrace,'color',[1 .7 0])
+        
+        if ptraceSTD_EXISTS
+            yitraceSTD(iok)=yySTD(iokxpatch);
+            set(ptraceSTD(iTRACE),'XData',x,'YData',yitraceSTD,'color',[.3 .1 1])
+        end
         
     end
 
 
-    function Cancel_whitout_applying(hObject, eventdata)
+    function Closethefigure(hObject, eventdata)
+        
         close(h1stripe.f);
     end
 
@@ -3208,7 +3729,7 @@ end
 %%
 
 function load_analysis(hObject, eventdata)
-global H HIM I0 HIMRGB BW ptrace pt_traces pt_traceLABEL Time ftrend ftrend_tick S output_message  sumI ww pt_start_time pt_end_time p_tick_1st p_tick_last hresult_time_marks
+global H HIM I0 HIMRGB BW ptrace ptraceSTD pt_traces pt_traceLABEL Time ftrend ftrend_tick S output_message  sumI ww pt_start_time pt_end_time p_tick_1st p_tick_last hresult_time_marks
 
 
 [filename, pathname]=uigetfile({'*.mat','mat files';...
@@ -3219,9 +3740,19 @@ end
 close(gcf); % close old one,
 
 
+
+hmsg = dialog('Units','Normalized','Position',[0.5 0.5 0.25 0.1],'Name','Loading saved analysis');
+uicontrol('Parent',hmsg,...
+    'Style','text','HorizontalAlignment','center',...
+    'Units','Normalized','Position',[0.01 .25 0.9 0.5],...
+    'String','Loading data, Please wait...','FontSize',12);
+pause(2)
+close(hmsg)
+disp('Loading data. This can take some time, please wait...')
 %load everything
 load(fullfile(pathname,filename));
 
+set(H.f1,'Visible','off')
 % modify tool bar
 temp= findall(findall(H.f1,'Type','uitoolbar'));
 %    ' 1'     'FigureToolBar'
@@ -3277,9 +3808,18 @@ uipushtool(temp(1),'Tag','Crop Image','Cdata',imread('crop.png','BackgroundColor
 uipushtool(temp(1),'Tag','Adjust contrast','Cdata',imread('contrast-icon.png','BackgroundColor',[1 1 1]),...
     'Separator','on','TooltipString','Adjust contrast',...
     'HandleVisibility','on','ClickedCallback',@adjust_contrast);
+
 uipushtool(temp(1),'Tag','Remove background','Cdata',imread('Removebackground.png','BackgroundColor',[1 1 1]),...
-    'Separator','on','TooltipString','Click to change image polarity',...
+    'Separator','on','TooltipString','Click remove lare background stains-colorization',...
     'HandleVisibility','on','ClickedCallback',@remove_background_withGAUSSFILT);
+
+% Create button image & Button
+tempim=imnoise(zeros([16,16,3],'uint8'),'salt & pepper',0.2);
+for ii=2:16, tempim(ii-1:ii,ii-1:ii,1)=255; tempim(ii-1:ii,ii-1:ii,2:3)=0 ;tempim([ii-1:ii],17-[ii-1:ii],1)=255; tempim([ii-1:ii],17-[ii-1:ii],2:3)=0; end
+uipushtool(temp(1),'Cdata',tempim,...
+    'Separator','off','TooltipString','Remove salt & pepper noise',...
+    'HandleVisibility','on','Enable','on','ClickedCallback',@remove_SaltandPepper);
+
 uipushtool(temp(1),'Tag','Correct rotation','Cdata',imread('correct_rotation.png','BackgroundColor',[1 1 1]),...
     'Separator','on','TooltipString','Cprrect for rotation',...
     'HandleVisibility','on','ClickedCallback',@estimate_rotation);
@@ -3299,12 +3839,6 @@ uipushtool(temp(1),'Tag','Measure tick length','Cdata',polarity_ic,...
     'HandleVisibility','on','ClickedCallback',@change_I0_polarity);
 clear polarity_ic;
 
-% % correct for repeated columns
-% icon_m=0.4*ones([16,16,3]); icon_m(:,8:11,:)=1;
-% uipushtool(temp(1),'Tag','Correct repeated columns','Cdata',icon_m,...
-%     'Separator','on','TooltipString','Click to correct repeated columns',...
-%     'HandleVisibility','on','ClickedCallback',@Correct_repeated_columns);
-% clear icon_m
 
 % Time marks up or down
 icon_m=zeros([16,16,3]); icon_m(8,:,:)=1; icon_m(4,6:10,:)=1; icon_m(13,6:10,1)=1;
@@ -3313,9 +3847,183 @@ H.timemarkpos=uitoggletool(temp(1),'Tag','Time marks relative position','Cdata',
     'HandleVisibility','on', 'State','off');
 clear icon_m
 
-
 H.tbar=findall(findall(H.f1,'Type','uitoolbar'));
 H.tbar_UNDO=findobj(temp(1),'Tag','Undo last');
+
+
+% uicontrols
+% retrieve data, delete and reconstruct
+
+
+temptimestr='yyyymmdd HH:MM:SS';
+try, temptimestr=H.edit_t0.String; end
+tempnumticks='';
+try, tempnumticks=H.edit_num_of_ticks.String; end
+
+
+delete(H.hp1)
+
+% create again
+H.hp1 = uipanel('Title','Reference time',...
+    'BackgroundColor','white',...
+    'Position',[.001 .78 .08 .22],'Parent',H.f1);
+
+H.edit_t0=uicontrol('Style', 'pushbutton','Parent',H.hp1,'units','normalized',...
+    'TooltipString','Date & Time of the 1st reference time mark (seismogram with time marks), or of the begining of the 1st trace (seismigram without time marks)',...
+    'string', temptimestr,'Position',[0.02 0.72 0.96 0.19],...
+    'BackgroundColor',[1 1 1],'Callback',@Get_DATE_TIME);
+uicontrol('Style', 'Text','Parent',H.hp1,'units','normalized',...
+    'String','# of time ticks',...
+    'Position',[0.01 0.48 0.5 0.19],'BackgroundColor',[1 1 1]);
+H.edit_num_of_ticks=uicontrol('Style', 'edit','Parent',H.hp1,'units','normalized',...
+    'TooltipString','Number of time ticks between 1st and last (including 1st and last)',...
+    'string',tempnumticks,'Position',[0.65 0.5 0.3 0.19],'BackgroundColor',[1 1 1]);
+H.mark_1st=uicontrol('Style', 'pushbutton','Parent',H.hp1,'units','normalized',...
+    'Tooltip','Mark the ending pixels of the 1st time marks',...
+    'String', '1st mark','Position',[0.02 0.28 0.6 0.19],...
+    'Callback',@(h,e) mark_1st_and_last(h,e,'FIRST',false));
+H.edit_mark_1st=uicontrol('Style', 'pushbutton','Parent',H.hp1,'units','normalized',...
+    'Tooltip','Edit the ending pixels of the 1st time marks',...
+    'String', 'Edit','Position',[0.63 0.28 0.34 0.19],...
+    'Callback',@(h,e) mark_1st_and_last(h,e,'FIRST',true),'Enable','on');
+H.mark_last=uicontrol('Style', 'pushbutton','Parent',H.hp1,'units','normalized',...
+    'Tooltip','Mark the last pixel of the last time marks',...
+    'String', 'Last mark','Position', [0.02 0.05 0.6 0.19],...
+    'Callback',@(h,e) mark_1st_and_last(h,e,'LAST',false));
+H.edit_mark_last=uicontrol('Style', 'pushbutton','Parent',H.hp1,'units','normalized',...
+    'Tooltip','Edit ending pixels of the last time marks',...
+    'String', 'Edit','Position', [0.63 0.05 0.34 0.19],...
+    'Callback',@(h,e) mark_1st_and_last(h,e,'LAST',true),'Enable','on');
+
+delete(H.mark_start)
+H.mark_start=uicontrol('Style', 'pushbutton','Parent',H.f1,'units','normalized',...
+    'String', 'Start of traces','Position', [0.002 0.73 0.05 0.04],...
+    'Callback',@(h,e) mark_start(h,e,0));
+
+delete(H.pbedit_start)
+H.pbedit_start=uicontrol('Style', 'pushbutton','Parent',H.f1,'units','normalized',...
+    'String', 'Edit','Position', [0.052 0.73 0.028 0.04],...
+    'Callback',@(h,e) mark_start(h,e,1),'Enable','on');
+
+delete(H.mark_end)
+H.mark_end=uicontrol('Style', 'pushbutton','Parent',H.f1,'units','normalized',...
+    'String', 'End of traces','Position', [0.002 0.69 0.05 0.04],...
+    'Callback',@(h,e) mark_end(h,e,0));
+
+delete(H.pbedit_end)
+H.pbedit_end=uicontrol('Style', 'pushbutton','Parent',H.f1,'units','normalized',...
+    'String', 'Edit','Position', [0.052 0.69 0.028 0.04],...
+    'Callback',@(h,e) mark_end(h,e,1),'Enable','on');
+
+delete(H.togle_timebounds_visibility),
+H.togle_timebounds_visibility=uicontrol('Style', 'checkbox','Parent',H.f1,'units','normalized',...
+    'String', 'Time boundaries visible','Enable','on','BackgroundColor','w',...
+    'Position', [0.002 0.65 0.08 0.03],'Callback',@togle_timebounds_visibility);
+
+
+try, delete(H.togle_time_marks), end
+% H.togle_time_marks=uicontrol('Style', 'checkbox','Parent',H.f1,'units','normalized',...
+%     'String', 'Timing symbols visible','Enable','on','BackgroundColor','w',...
+%     'Position', [0.002 0.62 0.08 0.03],'Callback',@togle_timesymbols_visibility);
+
+%DT
+
+temp={'60','1','720','25'};
+try
+    temp{1}=H.edit_DT.String; temp{2}=H.edit_DTtrace.String;
+    temp{3}=H.edit_DP.String; temp{4}=H.edit_tick_xlength.String;
+end
+
+delete(H.edit_DT)
+delete(H.edit_DTtrace)
+delete(H.edit_DP)
+delete(H.edit_tick_xlength)
+H.edit_DT=uicontrol('Style', 'edit','Parent',H.f1,'units','normalized',...
+    'TooltipString','Time difference between timemarks (s)','String',temp{1},...
+    'Position',[0.002 0.59 0.038 0.035],'BackgroundColor',[1 1 1],'Enable','on');
+H.edit_DTtrace=uicontrol('Style', 'edit','Parent',H.f1,'units','normalized',...
+    'TooltipString','time difference between succeding traces (in hours)','String',temp{2},...
+    'Position',[0.044 0.59 0.038 0.035],'BackgroundColor',[1 1 1],'Enable','on');
+H.edit_DP=uicontrol('Style', 'edit','Parent',H.f1,'units','normalized',...
+    'TooltipString','pixel dist between timemarks (px)','String', temp{3},...
+    'Position',[0.002 0.55 0.038 0.035],'BackgroundColor',[1 1 1],'Enable','on');
+H.edit_tick_xlength=uicontrol('Style', 'edit','Parent',H.f1,'units','normalized',...
+    'TooltipString','Approximate time mark length (px)','String', temp{4},...
+    'Position',[0.044 0.55 0.038 0.035],'BackgroundColor',[1 1 1],...
+    'Callback',@Evaluate_ticklength_input);
+
+delete(H.auto_num_of_traces)
+H.auto_num_of_traces=uicontrol('Style', 'pushbutton','Parent',H.f1,'units','normalized',...
+    'String', {'Identify traces', '& timemarks'},'Position', [0.002 0.505 0.08 0.04],...
+    'Callback',@find_traces,'Enable','on');
+
+delete(H.adjust_traces)
+H.adjust_traces=uicontrol('Style', 'pushbutton','Parent',H.f1,'units','normalized',...
+    'String', 'Adjust traces','Position', [0.002 0.465 0.08 0.04],'Callback',@adjust_traces);
+
+
+delete(H.togle_traces_visibility)
+H.togle_traces_visibility=uicontrol('Style', 'checkbox','Parent',H.f1,'units','normalized',...
+    'String', 'Traces 0-line visible','Enable','on','Position', [0.002 0.435 0.08 0.03],...
+    'BackgroundColor','w','Callback',@traces_visibility);
+delete(H.togle_digital_traces_visibility)
+H.togle_digital_traces_visibility=uicontrol('Style', 'checkbox','Parent',H.f1,'units','normalized',...
+    'String', 'Digitized traces visible','Enable','on','Position', [0.002 0.412 0.08 0.03],...
+    'BackgroundColor','w','Callback',@digital_traces_visibility);
+try, delete(H.togle_digital_traces_STD_visibility), end;
+H.togle_digital_traces_STD_visibility=uicontrol('Style', 'checkbox','Parent',H.f1,'units','normalized',...
+    'String', 'Digitized traces std visible','Enable','on','Position', [0.002 0.39 0.08 0.03],...
+    'BackgroundColor','w','Callback',@digital_traces_visibility);
+
+
+delete(H.correct_classification)
+H.correct_classification=uicontrol('Style', 'pushbutton','Parent',H.f1,'units','normalized',...
+    'String', 'Edit classification','Position', [0.002 0.32 0.08 0.04],...
+    'Callback',@correct_classification,'Enable','on');
+
+delete(H.Create_Time)
+H.Create_Time=uicontrol('Style', 'pushbutton','Parent',H.f1,'units','normalized',...
+    'String', 'Calculate Timing','Position', [0.002 0.27 0.08 0.04],'Callback',@Create_Time,'Enable','on');
+
+delete(H.text_luminance)
+H.text_luminance=uicontrol('Style', 'text','Parent',H.f1,'units','normalized',...
+    'String',{'Intensity';'threshold'},'Position', [0.002 0.2 0.04 0.04],'BackgroundColor',[1 1 1]);
+
+temp='10';
+try, temp=H.edit_luminance.String; end
+delete(H.edit_luminance)
+H.edit_luminance=uicontrol('Style', 'edit','Parent',H.f1,'units','normalized',...
+    'TooltipString','Luminance thershold should be between 1 and 99',...
+    'String',temp,'Position', [0.042 0.2 0.04 0.04],'BackgroundColor',[1 1 1]);
+
+delete(H.text_offset)
+H.text_offset=uicontrol('Style', 'text','Parent',H.f1,'units','normalized',...
+    'String',{'Offset from trace';'to digitize'},'Position', [0.002 0.151 0.04 0.04],...
+    'BackgroundColor',[1 1 1]);
+
+temp='[-0.3 0.3]';
+try, temp=H.edit_offset.String; end
+delete(H.edit_offset)
+H.edit_offset=uicontrol('Style', 'edit','Parent',H.f1,'units','normalized',...
+    'TooltipString',...
+    'Offset bellow and over the trace as a portion of the average trace distance, typical value: [0.3 0.3]',...
+    'String',temp,'Position', [0.042 0.151 0.04 0.04],'BackgroundColor',[1 1 1]);
+delete(H.digitize)
+H.digitize=uicontrol('Style', 'pushbutton','Parent',H.f1,'units','normalized',...
+    'String', 'Digitize','Position', [0.002 0.1 0.08 0.05],'Callback',@digitize_traces,'Enable','on');
+
+delete(H.digitize_1)
+H.digitize_1=uicontrol('Style', 'pushbutton','Parent',H.f1,'units','normalized',...
+    'String', 'Correct trace','Position', [0.002 0.048 0.08 0.05],'Callback',@correct_trace);
+
+delete(H.strMousePos)
+H.strMousePos=uicontrol('Style', 'pushbutton','Parent',H.f1,'units','normalized',...
+    'String', '','Tooltip','Push to reset','Position', [0.002 0.002 0.08 0.04],'Callback',set (H.f1, 'WindowButtonMotionFcn', @mouseMove));
+
+set (H.f1, 'WindowButtonMotionFcn', @mouseMove); % Display continiously mouse location
+disp('Completed.')
+set(H.f1,'Visible','on')
+
 
 drawnow
 end
@@ -3323,7 +4031,7 @@ end
 
 
 function Saveresults(hObject, eventdata)
-global H HIM I0 HIMRGB BW ptrace pt_traces pt_traceLABEL Time ftrend ftrend_tick S output_message  sumI ww pt_start_time pt_end_time p_tick_1st p_tick_last hresult_time_marks
+global H HIM I0 HIMRGB BW ptrace ptraceSTD pt_traces pt_traceLABEL Time ftrend ftrend_tick S output_message  sumI ww pt_start_time pt_end_time p_tick_1st p_tick_last hresult_time_marks
 
 %savefig(H.f1,['FIG_' get(H.textfilename,'String') '_.fig'])
 
@@ -3360,7 +4068,8 @@ else
     pt_tracesX=get(pt_traces,'Xdata');
     
     if any(ishandle(ptrace))
-        for iii=find(ishandle(ptrace))
+        itr=find(ishandle(ptrace));
+        for iii=itr(:)' % to force itr be a row vector
             ptraceY{iii}=get(ptrace(iii),'Ydata');
             ptraceX{iii}=get(ptrace(iii),'Xdata');
         end
@@ -3370,8 +4079,12 @@ else
     end
     
     save(fullfile(PathName,FileName),'H','HIM','HIMRGB','BW',...
-        'I0', 'ptrace', 'pt_traces','pt_tracesX','pt_tracesY','ptraceX','ptraceY','pt_traceLABEL', 'Time', 'ftrend','ftrend_tick','S','output_message',...
-        'sumI', 'ww', 'pt_start_time', 'pt_end_time', 'p_tick_1st', 'p_tick_last','hresult_time_marks','-v7.3');
+        'I0', 'ptrace','ptraceSTD', 'pt_traces','pt_tracesX',...
+        'pt_tracesY','ptraceX','ptraceY','pt_traceLABEL', 'Time',...
+        'ftrend','ftrend_tick','S','output_message','sumI', 'ww', ...
+        'pt_start_time', 'pt_end_time', 'p_tick_1st', 'p_tick_last',...
+        'hresult_time_marks','-v7.3');
+    
 end
 
 
@@ -3401,6 +4114,7 @@ for i=1:numel(ptrace)
     SEIS(i).E=etime(datevec(SEIS(i).t(end)),datevec(Time.RefDate));  % relative time from Reference Time
     
     SEIS(i).y=get(ptrace(i),'YDATA');
+    SEIS(i).ySTD=get(ptraceSTD(i),'YDATA');
     SEIS(i).trend=get(pt_traces(i),'YDATA');
     
     SEIS(i).reference_date=Time.RefDate;
@@ -3410,9 +4124,16 @@ for i=1:numel(ptrace)
     abstime(:,6)=abstime(:,6)+reltime(:);
     abstime=datenum(abstime);
     
+    
+    meanDATA1=mean(SEIS(i).DATA1(~isnan(SEIS(i).y)));
     SEIS(i).DATA1=SEIS(i).y-SEIS(i).trend;
-    SEIS(i).DATA1=SEIS(i).DATA1-mean(SEIS(i).DATA1(~isnan(SEIS(i).y)));
+    SEIS(i).DATA1=SEIS(i).DATA1-meanDATA1;
     SEIS(i).DATA1=interp1(SEIS(i).t,SEIS(i).DATA1,abstime);
+    
+    SEIS(i).DATA2=SEIS(i).ySTD-SEIS(i).y;
+    SEIS(i).DATA2=interp1(SEIS(i).t,SEIS(i).DATA2,abstime);
+    
+    
     SEIS(i).NPTS=length(SEIS(i).DATA1);
     
     
@@ -3517,20 +4238,20 @@ for i=1:length(pt_traces)
     Time.trace(i).fx_t=datenum(tv);
     
     %% have to do
-    %plot time marks in this case 
-
+    %plot time marks in this case
+    
     
 end
 
 
- 
-    % update user
-    output_message{end+1}=['Ready'];
-    set(H.output_mess,'String',output_message,'Value',length(output_message)); drawnow
 
-    
-    
-   
+% update user
+output_message{end+1}=['Ready'];
+set(H.output_mess,'String',output_message,'Value',length(output_message)); drawnow
+
+
+
+
 end
 
 
@@ -3985,9 +4706,6 @@ end
 [tS.STLO]=deal(-71.558);
 [tS.STEL]=deal(200);
 
-%end
-
-
 
 Fig_table = figure('Units','Normalized','Position',[0.2 0.1 0.4 0.7],...
     'color','w','WindowStyle','Normal','NumberTitle','Off','Name','Save in SAC format');
@@ -3999,7 +4717,6 @@ htabl = uitable('Units','normalized','Position',...
     'ColumnName', columnname,...
     'ColumnEditable', columneditable,...
     'RowName',field_names,'Parent',Fig_table);
-
 
 
 
@@ -4097,6 +4814,10 @@ hp_saveassac=uicontrol('Style', 'pushbutton','Parent',Fig_table,'units','normali
         for i=1:nS
             waitbar(i/total_wait,hbar,'Creating SAC structure, please wait...')
             SAC(i).DATA1=SEIS(i).DATA1;
+            if isfield(SEIS,DATA2)
+                SAC(i).DATA2=SEIS(i).DATA2;
+            end
+            
         end
         
         

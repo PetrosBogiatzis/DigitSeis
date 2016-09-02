@@ -1,4 +1,4 @@
-function ybest=digitize_trace_without_tickmarks(stripe,bstripe)
+function [ybest,ystd]=digitize_trace_without_tickmarks(stripe,bstripe)
 % THIS SOFTWARE IS PROVIDED BY THE AUTHORS ``AS IS'' AND ANY EXPRESS OR 
 % IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED 
 % WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE 
@@ -22,18 +22,7 @@ tol=1; % between 0 and 255
 [r1,c1]=size(stripe);
 stripe(~bstripe)=false;
 
-ybest=digitize_region(single(stripe),tol);
-end
-
-
-function y=digitize_region(A,tol)
-b=A>tol; % A has values from 0 to 255
-[r,~]=find(b);
-[rA,cA]=size(A);
-R=zeros(rA,cA,'single');
-R(b)=r;
-y=sum(R.*A.^2,1)./sum(A.^2,1);
-y(sum(b)<1)=nan;
+[ybest,ystd]=digitize_regionSTD(single(stripe),tol);
 end
 
 
