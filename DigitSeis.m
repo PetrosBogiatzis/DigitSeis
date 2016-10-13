@@ -19,6 +19,9 @@ function DigitSeis % for opening older analysis if replace the name of the funct
 %  Digitseis  is on the Github
 %  https://github.com/PetrosBogiatzis/DigitSeis
 %
+%  Version 0.75
+%   - Added buttons in the "adjust traces" dialog for fast selections.
+%   
 %  Version 0.72
 %   - Remove region in Correct classification gui (binary image)
 %   - Added contrast interactive tool in correct trace gui
@@ -2639,7 +2642,7 @@ dat=dat(idat,:);
 pt_traces=pt_traces(idat);
 
 
-f = figure('Units','Normalized','Position',[0.8 0.25 0.15 0.5],'color','w',...
+f = figure('Units','Normalized','Position',[0.8 0.25 0.18 0.5],'color','w',...
     'WindowStyle','normal','Menubar','None','Toolbar','none',...
     'NumberTitle','Off','Name','Adjust traces');
 columnname =   {'First y-pixel','First x-pixel','Last x-pixel','Active'};
@@ -2653,12 +2656,42 @@ t = uitable('Units','normalized','Position',...
     'RowName',1:numel(pt_traces));
 
 apply_changes=uicontrol('Style', 'pushbutton','Parent',f,'units','normalized',...
-    'String', 'Apply changes','Position', [0.67 0.02 0.3 0.05],'Callback',@apply_table_changes);
+    'String','Apply','Position', [0.782 0.02 0.2 0.07],'Callback',@apply_table_changes);
 
 add_trace=uicontrol('Style', 'pushbutton','Parent',f,'units','normalized',...
-    'String', '+','Position', [0.52 0.02 0.12 0.05],'Callback',@fadd_trace);
+    'String', '+','Position', [0.66 0.02 0.12 0.07],'Callback',@fadd_trace);
+
+
+uicontrol('Style', 'pushbutton','Parent',f,'units','normalized',...
+        'String', 'All','TooltipString','Click on all','Position', [0.01 0.02 0.18 0.05],'Callback',@select_trtab);
+uicontrol('Style', 'pushbutton','Parent',f,'units','normalized',...
+      'String', 'Odd','TooltipString','Click on the odd','Position', [0.2 0.02 0.18 0.05],'Callback',@select_trtab);
+uicontrol('Style', 'pushbutton','Parent',f,'units','normalized',...
+        'String', 'Even','TooltipString','Click on the even','Position', [0.39 0.02 0.18 0.05],'Callback',@select_trtab);
+    
+
 
 uiwait(gcf);
+
+%%%%%%%%% functions for the buttons of selection figure.
+    function select_trtab(hObject, eventdata)
+        tdata=get(t,'data');
+        r=size(tdata,1);
+        if strcmpi(get(hObject,'String'), 'All')
+            tdata(1:r,end)=num2cell(~[tdata{1:r,end}]);
+        elseif strcmpi(get(hObject,'String'), 'Odd')
+            tdata(1:2:r-1,end)=num2cell(~[tdata{1:2:r-1,end}]);
+        elseif strcmpi(get(hObject,'String'), 'Even')
+            tdata(2:2:r,end)=num2cell(~[tdata{2:2:r,end}]);
+        else
+            error('Wrong selection (it should never gets here)')
+        end
+        set(t,'data',tdata);
+        
+    end
+
+
+
 
     function fadd_trace(hObject, eventdata)
         [r,c]=size(I0);
@@ -2797,7 +2830,7 @@ else
 end
 
 
-
+    
 %%%%%%%%% functions for the buttons of selection figure.
 function select_tr(hObject, eventdata)
    tdata=get(t,'data');
@@ -4125,8 +4158,8 @@ for i=1:numel(ptrace)
     abstime=datenum(abstime);
     
     
-    meanDATA1=mean(SEIS(i).DATA1(~isnan(SEIS(i).y)));
     SEIS(i).DATA1=SEIS(i).y-SEIS(i).trend;
+    meanDATA1=mean(SEIS(i).DATA1,'omitnan');
     SEIS(i).DATA1=SEIS(i).DATA1-meanDATA1;
     SEIS(i).DATA1=interp1(SEIS(i).t,SEIS(i).DATA1,abstime);
     
@@ -4477,8 +4510,12 @@ hresult_time_marks=[hresult_time_marks;...
     findobj(H.ax1,'color','m');...
     findobj(H.ax1,'Edgecolor','y')];
 
+try
 set(H.togle_time_marks,'Enable','on');
-
+catch me
+    msgText = getReport(me,'extended');
+    warning(msgText);
+end
 % update user
 output_message{end+1}=['Ready'];
 set(H.output_mess,'String',output_message,'Value',length(output_message)); drawnow
@@ -4507,7 +4544,6 @@ end
 function saveassac(SEIS)
 global H
 % save digitized traces in sac format
-
 %    FILENAME   - File name of SAC data file
 %    DELTA      - Data sampling interval
 %    DEPMIN     - Minimum value of dependent variable
@@ -4814,7 +4850,7 @@ hp_saveassac=uicontrol('Style', 'pushbutton','Parent',Fig_table,'units','normali
         for i=1:nS
             waitbar(i/total_wait,hbar,'Creating SAC structure, please wait...')
             SAC(i).DATA1=SEIS(i).DATA1;
-            if isfield(SEIS,DATA2)
+            if isfield(SEIS,'DATA2')
                 SAC(i).DATA2=SEIS(i).DATA2;
             end
             
