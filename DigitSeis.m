@@ -19,6 +19,9 @@ function DigitSeis % for opening older analysis if replace the name of the funct
 %  Digitseis  is on the Github
 %  https://github.com/PetrosBogiatzis/DigitSeis
 %
+%  Version 0.76
+%   - Fixed combatibility isue with previous versions without envelope option 
+%
 %  Version 0.75
 %   - Added buttons in the "adjust traces" dialog for fast selections.
 %   
@@ -4117,7 +4120,7 @@ else
         'ftrend','ftrend_tick','S','output_message','sumI', 'ww', ...
         'pt_start_time', 'pt_end_time', 'p_tick_1st', 'p_tick_last',...
         'hresult_time_marks','-v7.3');
-    
+     
 end
 
 
@@ -4147,7 +4150,9 @@ for i=1:numel(ptrace)
     SEIS(i).E=etime(datevec(SEIS(i).t(end)),datevec(Time.RefDate));  % relative time from Reference Time
     
     SEIS(i).y=get(ptrace(i),'YDATA');
-    SEIS(i).ySTD=get(ptraceSTD(i),'YDATA');
+    if ~isempty(ptraceSTD)
+      SEIS(i).ySTD=get(ptraceSTD(i),'YDATA');
+    end
     SEIS(i).trend=get(pt_traces(i),'YDATA');
     
     SEIS(i).reference_date=Time.RefDate;
@@ -4162,10 +4167,13 @@ for i=1:numel(ptrace)
     meanDATA1=mean(SEIS(i).DATA1,'omitnan');
     SEIS(i).DATA1=SEIS(i).DATA1-meanDATA1;
     SEIS(i).DATA1=interp1(SEIS(i).t,SEIS(i).DATA1,abstime);
-    
-    SEIS(i).DATA2=SEIS(i).ySTD-SEIS(i).y;
-    SEIS(i).DATA2=interp1(SEIS(i).t,SEIS(i).DATA2,abstime);
-    
+   
+     if ~isempty(ptraceSTD)
+        SEIS(i).DATA2=SEIS(i).ySTD-SEIS(i).y;
+        SEIS(i).DATA2=interp1(SEIS(i).t,SEIS(i).DATA2,abstime);
+     else
+        SEIS(i).DATA2=[];
+     end
     
     SEIS(i).NPTS=length(SEIS(i).DATA1);
     
